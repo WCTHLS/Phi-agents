@@ -1,0 +1,62 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+coverage/
+*.log
+npm-debug.log*
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local data and models (large, licensed, or sensitive)
+data/
+storage/
+seaweedfs-data/
+pgdata/
+*.sqlite3
+*.db
+models/
+*.gguf
+*.safetensors
+*.bin
+sources/raw/
+
+# Containers and operations
+.podman/
+compose.override.yaml
+docker-compose.override.yml
+
+# Docs kept out of version control for now
+docs/System Design/
+
+# Claude Code local settings
+.claude/settings.local.json
