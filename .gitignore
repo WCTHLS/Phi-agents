@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Local data and model artifacts
+/data/**
+!/data/sources/
+!/data/sources/README.md
+/models/
+*.onnx
+*.pt
+*.safetensors
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
