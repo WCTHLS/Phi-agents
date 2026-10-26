@@ -1,13 +1,12 @@
 """Tests for Phase 1 literature and regulatory research retrieval and question answering."""
 
-import pytest
 from fastapi.testclient import TestClient
 
-from pharma_ai.main import app
+from pharma_ai.features.research.answering import ResearchAnsweringService
+from pharma_ai.features.research.retrieval import HybridEvidenceRetriever
 from pharma_ai.features.research.schemas import ResearchQuery
 from pharma_ai.features.research.source_registry import get_approved_documents
-from pharma_ai.features.research.retrieval import HybridEvidenceRetriever
-from pharma_ai.features.research.answering import ResearchAnsweringService
+from pharma_ai.main import app
 
 client = TestClient(app)
 
@@ -31,7 +30,9 @@ def test_approved_sources_have_valid_metadata_and_hashes():
 def test_retrieval_returns_relevant_fda_chunk_for_ndma():
     """Verify hybrid retrieval accurately finds the FDA acceptable intake limits for NDMA."""
     retriever = HybridEvidenceRetriever()
-    query = ResearchQuery(query="What is the acceptable intake limit for NDMA according to FDA?", top_k=2)
+    query = ResearchQuery(
+        query="What is the acceptable intake limit for NDMA according to FDA?", top_k=2
+    )
     chunks = retriever.retrieve(query)
 
     assert len(chunks) > 0

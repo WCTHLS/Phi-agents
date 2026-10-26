@@ -1,10 +1,10 @@
 """Curated registry of approved regulatory guidelines and scientific evidence chunks."""
 
 import hashlib
-from typing import List, Dict
+
 from pharma_ai.features.research.schemas import DocumentMetadata, EvidenceChunk
 
-_DOCUMENTS_META: List[Dict] = [
+_DOCUMENTS_META: list[dict] = [
     {
         "source_id": "fda-nitrosamines-rev1",
         "title": "Control of Nitrosamine Impurities in Human Drugs: Guidance for Industry (Rev 1)",
@@ -34,7 +34,7 @@ _DOCUMENTS_META: List[Dict] = [
     },
 ]
 
-_RAW_EVIDENCE_CHUNKS: List[Dict] = [
+_RAW_EVIDENCE_CHUNKS: list[dict] = [
     {
         "chunk_id": "fda-nitro-chunk-01",
         "source_id": "fda-nitrosamines-rev1",
@@ -131,26 +131,28 @@ _RAW_EVIDENCE_CHUNKS: List[Dict] = [
 ]
 
 
-def get_approved_documents() -> List[DocumentMetadata]:
+def get_approved_documents() -> list[DocumentMetadata]:
     """Retrieve all approved documents with computed SHA-256 hashes."""
     documents = []
     for doc in _DOCUMENTS_META:
         content_repr = doc["title"] + doc["source_id"] + doc["version"]
         h = hashlib.sha256(content_repr.encode("utf-8")).hexdigest()
-        documents.append(DocumentMetadata(
-            source_id=doc["source_id"],
-            title=doc["title"],
-            publisher=doc["publisher"],
-            publication_date=doc["publication_date"],
-            version=doc["version"],
-            url_or_identifier=doc["url_or_identifier"],
-            content_hash=h,
-            notes=doc["notes"],
-        ))
+        documents.append(
+            DocumentMetadata(
+                source_id=doc["source_id"],
+                title=doc["title"],
+                publisher=doc["publisher"],
+                publication_date=doc["publication_date"],
+                version=doc["version"],
+                url_or_identifier=doc["url_or_identifier"],
+                content_hash=h,
+                notes=doc["notes"],
+            )
+        )
     return documents
 
 
-def get_raw_evidence_chunks() -> List[EvidenceChunk]:
+def get_raw_evidence_chunks() -> list[EvidenceChunk]:
     """Retrieve all pre-indexed authentic regulatory evidence chunks."""
     return [
         EvidenceChunk(
@@ -160,7 +162,7 @@ def get_raw_evidence_chunks() -> List[EvidenceChunk]:
             section=c["section"],
             page=c["page"],
             text=c["text"],
-            similarity_score=0.0
+            similarity_score=0.0,
         )
         for c in _RAW_EVIDENCE_CHUNKS
     ]

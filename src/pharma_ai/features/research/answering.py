@@ -1,15 +1,13 @@
 """Evidence-grounded question answering engine with citation enforcement and hallucination guardrails."""
 
 import re
-from typing import List, Tuple
-from pharma_ai.core.models_config import model_config
+
+from pharma_ai.features.research.retrieval import HybridEvidenceRetriever
 from pharma_ai.features.research.schemas import (
+    Citation,
     ResearchQuery,
     ResearchResponse,
-    Citation,
-    EvidenceChunk,
 )
-from pharma_ai.features.research.retrieval import HybridEvidenceRetriever
 
 
 class ResearchAnsweringService:
@@ -42,9 +40,9 @@ class ResearchAnsweringService:
                 retrieved_evidence=[],
             )
 
-        citations: List[Citation] = []
-        synthesized_points: List[str] = []
-        query_terms = set(re.findall(r'[a-zA-Z0-9\-]+', query.query.lower()))
+        citations: list[Citation] = []
+        synthesized_points: list[str] = []
+        query_terms = set(re.findall(r"[a-zA-Z0-9\-]+", query.query.lower()))
 
         for chunk in retrieved_chunks:
             quote_text = chunk.text
@@ -70,7 +68,9 @@ class ResearchAnsweringService:
         covered_text = " ".join([c.text.lower() for c in retrieved_chunks])
         for term in query_terms:
             if len(term) > 4 and term not in covered_text:
-                evidence_gaps.append(f"Specific data regarding '{term}' is not explicitly defined in the retrieved passages.")
+                evidence_gaps.append(
+                    f"Specific data regarding '{term}' is not explicitly defined in the retrieved passages."
+                )
 
         # Compute confidence score
         avg_score = sum(c.similarity_score for c in retrieved_chunks) / len(retrieved_chunks)
