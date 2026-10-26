@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 
 from pharma_ai.api.routes.health import router as health_router
+from pharma_ai.api.routes.research import router as research_router
 from pharma_ai.core.config import settings
 
 app = FastAPI(
@@ -15,3 +16,4 @@ app = FastAPI(
 )
 
 app.include_router(health_router, tags=["health"])
+app.include_router(research_router)
