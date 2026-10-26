@@ -48,12 +48,14 @@ Database settings are examples in `.env.example`. No database connection is used
 pharma-ai-platform/
 ├── frontend/                              # React + Vite Researcher Workspace UI (3-panel layout)
 ├── data/
-│   └── sources/                           # Permitted regulatory documents & sample files
+│   └── sources/                           # Approved-source manifest (corpus_manifest.csv) and corpus guide (CORPUS.md)
 ├── docs/
 │   ├── architecture/                      # System diagrams, overview & ADRs
 │   ├── implementation/                    # Phased delivery plan & task board
 │   └── security/                          # 21 CFR Part 11, GxP & data handling checklists
+├── evals/                                 # Golden questions + evidence checker (verify_questions.py)
 ├── scripts/
+│   ├── fetch_corpus.py                    # Download the approved corpus PDFs (not committed)
 │   └── init-db.sql                        # PostgreSQL + pgvector schema initialization
 ├── src/
 │   └── pharma_ai/                         # Core Python package

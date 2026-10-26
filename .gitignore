@@ -22,9 +22,20 @@ build/
 *.onnx
 *.pt
 *.safetensors
+/docs/System Design/
 
 # IDE / OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Sprint 2 test corpus (see data/sources/CORPUS.md)
+# Downloaded originals and the register built from them are never committed.
+/data/corpus/
+*.part
+# Output of evals/verify_questions.py (regenerated; contains text from the PDFs)
+/evals/golden_questions_checked.csv
+# The manifest and its guide are tracked (the /data/** rule above would otherwise hide them)
+!/data/sources/corpus_manifest.csv
+!/data/sources/CORPUS.md
