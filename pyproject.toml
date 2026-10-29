@@ -20,6 +20,7 @@ dev = [
   "httpx>=0.27,<1.0",
   "ruff>=0.4,<1.0",
   "pip-licenses>=4.3,<6.0",
+  "pyyaml>=6.0,<7.0",
 ]
 research = [
   "haystack-ai>=2.0,<3.0",

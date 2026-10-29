@@ -89,3 +89,24 @@ jobs:
         with:
           name: dependency-license-report
           path: reports/dependency-licenses.md
+
+  frontend-build:
+    name: Frontend UI Build (React + Vite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Frontend Dependencies
+        run: npm install
+
+      - name: Build Production Bundle
+        run: npm run build
