@@ -90,9 +90,9 @@ def test_answering_fails_closed_when_evidence_is_missing():
     assert "ungrounded response is withheld" in response.answer
 
 
-def test_api_list_sources_endpoint():
+def test_api_list_sources_endpoint(auth_headers: dict[str, str]):
     """Verify GET /api/v1/research/sources returns the approved sources list."""
-    res = client.get("/api/v1/research/sources")
+    res = client.get("/api/v1/research/sources", headers=auth_headers)
     assert res.status_code == 200
     sources = res.json()
     assert isinstance(sources, list)
@@ -100,13 +100,13 @@ def test_api_list_sources_endpoint():
     assert any(s["source_id"] == "ich-q3d-elemental-impurities" for s in sources)
 
 
-def test_api_query_endpoint_for_elemental_impurities():
+def test_api_query_endpoint_for_elemental_impurities(auth_headers: dict[str, str]):
     """Verify POST /api/v1/research/query returns grounded response for elemental impurities."""
     payload = {
         "query": "What are the Class 1 elemental impurities and oral PDE limits in ICH Q3D?",
         "top_k": 2,
     }
-    res = client.post("/api/v1/research/query", json=payload)
+    res = client.post("/api/v1/research/query", json=payload, headers=auth_headers)
     assert res.status_code == 200
 
     data = res.json()

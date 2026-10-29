@@ -9,7 +9,7 @@ An open-source-first foundation for a pharma-domain AI assistant supporting trus
 ### 1. Prerequisites
 - Python 3.11 or 3.12
 - Git
-- Optional: Docker Desktop (only needed to run the local PostgreSQL/pgvector database)
+- Optional: Docker Desktop or Podman (needed to run the local containerized dev stack)
 
 ### 2. Create and activate a virtual environment
 
@@ -34,19 +34,41 @@ Open `http://127.0.0.1:8000/health` and expect `{"status":"ok"}`.
 pytest
 ```
 
-### 5. Optional local database
+### 5. One-Command Containerized Dev Environment (Docker / Podman)
 
-```powershell
-docker compose up -d db
+Start the complete local stack (**FastAPI**, **PostgreSQL 16 + pgvector**, **Keycloak SSO**, **Apache Tika**, and **Nginx reverse proxy**) with seed data:
+
+**Linux / macOS / WSL (using `make`):**
+```bash
+make up
 ```
 
-Database settings are examples in `.env.example`. No database connection is used by the health-check endpoint yet.
+**Windows PowerShell (Docker or Podman Compose):**
+```powershell
+Copy-Item .env.example .env -ErrorAction SilentlyContinue
+docker compose up -d --build
+# Or with Podman:
+podman compose up -d --build
+```
+
+| Service | Default Local URL | Purpose |
+| :--- | :--- | :--- |
+| **Nginx Gateway** | `http://localhost:8088` | Reverse proxy routing `/api`, `/health`, `/ready`, `/realms` |
+| **FastAPI Backend** | `http://localhost:8000/docs` | OpenAPI interactive documentation, `/health`, `/ready` |
+| **Keycloak OIDC** | `http://localhost:8080` | Local SSO with pre-imported `pharma` realm & roles |
+| **Apache Tika** | `http://localhost:9998` | Document & PDF text extraction service |
+| **PostgreSQL + pgvector** | `localhost:5432` | Vector store seeded via `scripts/init-db.sql` |
+
+To stop all services: `make down` or `docker compose down`.
 
 ## Repository structure
 
 ```text
 pharma-ai-platform/
 ├── frontend/                              # React + Vite Researcher Workspace UI (3-panel layout)
+├── infra/                                 # Container configuration
+│   ├── keycloak/                          # Pre-seeded local 'pharma' OIDC realm
+│   └── nginx/                             # Reverse proxy routing configuration
 ├── data/
 │   └── sources/                           # Approved-source manifest (corpus_manifest.csv) and corpus guide (CORPUS.md)
 ├── docs/
@@ -56,7 +78,7 @@ pharma-ai-platform/
 ├── evals/                                 # Golden questions + evidence checker (verify_questions.py)
 ├── scripts/
 │   ├── fetch_corpus.py                    # Download the approved corpus PDFs (not committed)
-│   └── init-db.sql                        # PostgreSQL + pgvector schema initialization
+│   └── init-db.sql                        # PostgreSQL + pgvector schema & seed initialization
 ├── src/
 │   └── pharma_ai/                         # Core Python package
 │       ├── api/                           # FastAPI routers & request validation

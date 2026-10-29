@@ -12,6 +12,8 @@ dependencies = [
   "fastapi>=0.110,<1.0",
   "uvicorn[standard]>=0.27,<1.0",
   "pydantic-settings>=2.2,<3.0",
+  "pyjwt[crypto]>=2.8,<3.0",
+  "cryptography>=42.0,<45.0",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +22,7 @@ dev = [
   "httpx>=0.27,<1.0",
   "ruff>=0.4,<1.0",
   "pip-licenses>=4.3,<6.0",
+  "pyyaml>=6.0,<7.0",
 ]
 research = [
   "haystack-ai>=2.0,<3.0",

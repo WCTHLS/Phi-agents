@@ -39,3 +39,9 @@ Thumbs.db
 # The manifest and its guide are tracked (the /data/** rule above would otherwise hide them)
 !/data/sources/corpus_manifest.csv
 !/data/sources/CORPUS.md
+
+# Frontend Node / Vite
+node_modules/
+frontend/dist/
+reports/
+*.tsbuildinfo
