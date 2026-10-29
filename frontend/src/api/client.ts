@@ -99,3 +99,81 @@ export async function submitResearchQuery(
   }
   return (await response.json()) as ResearchResponse;
 }
+
+export interface AuditEventItem {
+  event_id: string;
+  timestamp: string;
+  actor_id: string;
+  actor_role: string;
+  project_id?: string | null;
+  action: string;
+  resource_type: string;
+  resource_id?: string | null;
+  outcome: string;
+  details: Record<string, unknown> | string;
+}
+
+export interface AuditEventsResponse {
+  items: AuditEventItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export async function fetchAuditEvents(
+  accessToken?: string,
+  filters?: {
+    projectId?: string;
+    actor?: string;
+    action?: string;
+    page?: number;
+    pageSize?: number;
+  }
+): Promise<AuditEventsResponse> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+  const params = new URLSearchParams();
+  if (filters?.projectId && filters.projectId !== "ALL") params.append("project_id", filters.projectId);
+  if (filters?.actor && filters.actor.trim()) params.append("actor", filters.actor.trim());
+  if (filters?.action && filters.action !== "ALL") params.append("action", filters.action);
+  if (filters?.page) params.append("page", String(filters.page));
+  if (filters?.pageSize) params.append("page_size", String(filters.pageSize));
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE}/api/v1/audit/events${query}`, { headers });
+  if (!response.ok) {
+    throw new Error(`Failed to load audit events (${response.status})`);
+  }
+  return (await response.json()) as AuditEventsResponse;
+}
+
+export async function recordAuditEvent(
+  payload: {
+    action: string;
+    resource_type: string;
+    resource_id?: string | null;
+    project_id?: string | null;
+    outcome?: string;
+    details?: Record<string, unknown>;
+  },
+  accessToken?: string
+): Promise<AuditEventItem> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+  const response = await fetch(`${API_BASE}/api/v1/audit/events`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to record audit event (${response.status})`);
+  }
+  return (await response.json()) as AuditEventItem;
+}

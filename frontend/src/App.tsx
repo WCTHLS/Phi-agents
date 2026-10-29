@@ -3,6 +3,8 @@ import {
   checkHealth,
   DocumentMetadata,
   fetchApprovedSources,
+  fetchAuditEvents,
+  recordAuditEvent,
   ResearchResponse,
   submitResearchQuery,
 } from "./api/client";
@@ -149,6 +151,42 @@ export function App(): React.ReactElement {
     };
   }, [session?.accessToken]);
 
+  useEffect(() => {
+    if (activeTab !== "audit" || session?.role !== "admin" || !session?.accessToken) return;
+    let mounted = true;
+    fetchAuditEvents(session.accessToken, {
+      projectId: filterProject,
+      action: filterAction,
+      actor: filterActor,
+      page: 1,
+      pageSize: 50,
+    })
+      .then((res) => {
+        if (!mounted || !res.items) return;
+        const mapped: AuditRecord[] = res.items.map((it) => ({
+          id: it.event_id,
+          timestamp: it.timestamp,
+          actor: it.actor_id,
+          role: (it.actor_role as UserRole) || "admin",
+          project: it.project_id || "GLOBAL",
+          action: it.action,
+          resource: it.resource_id || it.resource_type,
+          details:
+            typeof it.details === "string"
+              ? it.details
+              : JSON.stringify(it.details).replace(/[{}"]/g, " "),
+        }));
+        setAuditLogs(mapped);
+      })
+      .catch(() => {
+        // Fall back to local state if backend audit endpoint is offline
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [activeTab, session?.accessToken, session?.role, filterProject, filterAction, filterActor]);
+
   async function handleRunQuery(e: React.FormEvent) {
     e.preventDefault();
     if (!queryText.trim()) return;
@@ -194,17 +232,34 @@ export function App(): React.ReactElement {
   function handleReviewDecision(decision: "APPROVED" | "EVIDENCE_REQUESTED") {
     if (!session) return;
     setReportStatus(decision);
+    const action = decision === "APPROVED" ? "REPORT_SECTION_APPROVED" : "REPORT_EVIDENCE_REQUESTED";
     const newEntry: AuditRecord = {
       id: `AUD-${1005 + auditLogs.length}`,
       timestamp: new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC",
       actor: session.email,
       role: session.role,
       project: selectedProject,
-      action: decision === "APPROVED" ? "REPORT_SECTION_APPROVED" : "REPORT_EVIDENCE_REQUESTED",
+      action,
       resource: "PDR-3.2.P.2-v1.3",
       details: reviewRationale || "Scientist review decision recorded",
     };
     setAuditLogs([newEntry, ...auditLogs]);
+
+    if (session.accessToken) {
+      recordAuditEvent(
+        {
+          action,
+          resource_type: "report_section",
+          resource_id: "PDR-3.2.P.2-v1.3",
+          project_id: selectedProject,
+          outcome: "SUCCESS",
+          details: { rationale: reviewRationale },
+        },
+        session.accessToken
+      ).catch(() => {
+        // Tolerant to offline dev server
+      });
+    }
   }
 
   const filteredAuditLogs = auditLogs.filter((item) => {

@@ -1,6 +1,6 @@
 """API routes for regulatory research and evidence retrieval."""
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from pharma_ai.features.research.answering import ResearchAnsweringService
 from pharma_ai.features.research.schemas import (
@@ -9,8 +9,14 @@ from pharma_ai.features.research.schemas import (
     ResearchResponse,
 )
 from pharma_ai.features.research.source_registry import get_approved_documents
+from pharma_ai.infrastructure.security.auth import get_current_principal
 
-router = APIRouter(prefix="/api/v1/research", tags=["research"])
+# Every research endpoint requires an authenticated caller (401 otherwise).
+router = APIRouter(
+    prefix="/api/v1/research",
+    tags=["research"],
+    dependencies=[Depends(get_current_principal)],
+)
 _answering_service = ResearchAnsweringService()
 
 
