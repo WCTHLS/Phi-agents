@@ -8,7 +8,7 @@ Public documents for building and testing ingestion, chunking, retrieval and cit
 
 | File | Purpose |
 |---|---|
-| `data/sources/corpus_manifest.csv` | 22 documents, with licence status, reuse basis, attribution text, links and flags. The `tier` column says where each stands: 12 `core` (in the corpus), 3 `deferred` (`eligible=yes`, but not downloaded for now) and 7 `hold` (`eligible=no`) |
+| `data/sources/corpus_manifest.csv` | 22 documents, with licence status, reuse basis, attribution text, links and flags. The `tier` column says where each stands: 13 `core` (in the corpus), 2 `deferred` (`eligible=yes`, but no correct PDF yet) and 7 `hold` (`eligible=no`) |
 | `scripts/fetch_corpus.py` | Downloads the core PDFs, fingerprints them, checks the text layer, writes the register |
 | `evals/golden_questions.csv` | 16 draft test questions, each with a machine-checkable evidence spec |
 | `evals/verify_questions.py` | Finds the evidence page for each question in the downloaded PDFs and flags questions that don't hold up |
@@ -21,13 +21,15 @@ Run from the repository root.
 
 ```bash
 pip install pypdf
-python scripts/fetch_corpus.py          # core set (12)
+python scripts/fetch_corpus.py          # core set (13)
 python evals/verify_questions.py        # after the PDFs are in place
 ```
 
-Three documents are **deferred** (`tier=deferred`): they were not downloaded because their source sites would not load, so the fetch script skips them. Their licence findings are unchanged and they stay `eligible=yes`. See the Deferred section below for how to bring them back.
+Two documents are **deferred** (`tier=deferred`): there is no correct PDF for them yet, so the fetch script skips them. Their licence findings are unchanged and they stay `eligible=yes`. See the Deferred section below for how to bring them back.
 
-## Core set (12) – all eligible, in the corpus
+`FDA-NITRO-2024` cannot be fetched by the script (fda.gov answers scripted requests with a redirect loop and bot-protection cookies; do not work around it). It was saved by hand into `data/corpus/originals/FDA-NITRO-2024.pdf`, and the script then fingerprinted it like the rest.
+
+## Core set (13) – all eligible, in the corpus
 
 | # | doc_id | Document | Version | Licence basis |
 |---|---|---|---|---|
@@ -43,22 +45,28 @@ Three documents are **deferred** (`tier=deferred`): they were not downloaded bec
 | 10 | FDA-ANDA-STAB-2014 | ANDAs: Stability Testing, Questions and Answers | Final, May 2014 | FDA site policy |
 | 11 | FDA-PV-2011 | Process Validation: General Principles and Practices | Final, Jan 2011 | FDA site policy |
 | 12 | FDA-SIZE-2022 | Size, Shape and Physical Attributes of Generic Tablets and Capsules | Rev. 1, Oct 2022 | FDA site policy |
+| 13 | FDA-NITRO-2024 | Control of Nitrosamine Impurities in Human Drugs | Revision 2, Sept 2024 (46 pages, checked) | FDA site policy |
 
-No document in the current corpus is Indian, and the corpus has no FDA nitrosamine guidance. That is a limit of what was downloadable for now, not a judgement of what matters for India.
+No document in the current corpus is Indian. That is a limit of what has been downloaded correctly so far, not a judgement of what matters for India.
 
-## Deferred (3) – eligible, not in the corpus for now
+## Deferred (2) – eligible, not in the corpus for now
 
-These stay `eligible=yes` because their licence findings are unchanged. They were deferred on 26 Oct 2026 because their source sites would not load. Nothing may be ingested from them until the PDFs are saved by hand and the rows are set back to `tier=core`.
+Both stay `eligible=yes` because their licence findings are unchanged. Nothing may be ingested from them until the correct PDFs are saved by hand and the rows are set back to `tier=core`.
 
-| doc_id | Document | Licence basis | Why not downloaded |
+| doc_id | Document | Licence basis | Status (26 Oct 2026) |
 |---|---|---|---|
-| FDA-NITRO-2024 | Control of Nitrosamine Impurities in Human Drugs | FDA site policy | fda.gov answered scripted requests with a redirect loop (HTTP 301 plus bot-protection cookies). Do not work around the block in the script |
-| IN-SCHEDM-2023 | Revised Schedule M (GMP) | Copyright Act s.52(1)(q)(i) | e-Gazette (egazette.gov.in) would not load |
-| IN-NDCT-2019 | New Drugs and Clinical Trials Rules (original text) | Copyright Act s.52(1)(q)(i) | e-Gazette would not load |
+| IN-SCHEDM-2023 | Revised Schedule M (GMP), G.S.R. 922(E), 28 Dec 2023, Ministry of Health and Family Welfare | Copyright Act s.52(1)(q)(i) | The file first saved was a different notification: G.S.R. 922(E) of 23 Dec 2025 from the Ministry of Fisheries, Animal Husbandry and Dairying (4 pages) |
+| IN-NDCT-2019 | New Drugs and Clinical Trials Rules, 2019 (original text), G.S.R. 227(E), 19 Mar 2019 | Copyright Act s.52(1)(q)(i) | The file first saved was a Finance Ministry income-tax corrigendum, G.S.R. 263(E) of 10 Apr 2026 (2 pages) |
 
-To bring them back:
-1. Save each PDF into `data/corpus/originals/` as `<doc_id>.pdf`. Use the Gazette copy for the two Indian documents (search G.S.R. 922(E) of 28-12-2023 and G.S.R. 227(E) of 19-03-2019), not a website or third-party copy.
-2. Set `tier` back to `core` in the manifest and update the counts in this guide.
+**Why this happened:** G.S.R. numbers restart every year, so a search by number alone returns unrelated notifications. Check the **year, the issuing ministry (Health and Family Welfare) and the date** before saving. A real Schedule M or NDCT Rules document should run to many pages, so a 2-4 page PDF is a warning sign.
+
+The two wrong files were moved to `data/corpus/rejected/` (not committed) and are kept only as a record.
+
+To bring these back:
+1. Save the correct PDF into `data/corpus/originals/` as `<doc_id>.pdf`, from the e-Gazette copy, not a website or third-party copy. Make sure the file name does not end `.pdf.pdf` (Windows hides known extensions).
+2. Open it and confirm the issuing ministry, date and title match the table above.
+3. Set `tier` back to `core` in the manifest and update the counts in this guide.
+4. Run `python scripts/fetch_corpus.py`, then `python evals/verify_questions.py`.
 3. Run `python scripts/fetch_corpus.py`, then `python evals/verify_questions.py`.
 
 ## On hold (7) – do not ingest
@@ -98,37 +106,39 @@ The Indian Pharmacopoeia (IP 2026) is also out: it is licensed content, and nobo
 
 The checker proves the passage exists and where. It cannot show whether the question matters to a scientist or whether the answer is scientifically right. The PRD's Phase 1 exit gate ("reviewed research background") needs that scientist review.
 
-### Machine check (25-26 Oct 2026, 12 documents in the corpus)
+### Machine check (26 Oct 2026, 13 documents in the corpus)
+
+11 of 16 questions pass.
 
 | Result | Questions |
 |---|---|
-| OK (evidence page found) | GQ-01, 02, 04, 05, 07, 08, 09, 14 |
-| OK for the two gap questions: terms not found in the 12 corpus documents | GQ-15, GQ-16. Valid for this corpus only; they must be re-checked if the deferred documents are added, because Schedule M or the NDCT Rules could mention the terms |
-| `NOT_FOUND` | GQ-06. The 2018 FDA guidance (page 8) says the dissolution criterion is "Q=80% in 30 minutes"; the question's pattern and its draft answer say 85%. The question needs fixing by its owner |
-| `DOC_MISSING` | GQ-03, GQ-10 (need the deferred `FDA-NITRO-2024`), GQ-11 (needs the deferred `IN-SCHEDM-2023`), GQ-12, GQ-13 (need the deferred `IN-NDCT-2019`) |
+| OK (evidence page found) | GQ-01, 02, 04, 05, 07, 08, 09, 10, 14 |
+| OK for the two gap questions: terms not found in the 13 corpus documents | GQ-15, GQ-16. Valid for this corpus only; they must be re-checked if the deferred documents are added, because Schedule M or the NDCT Rules could mention the terms |
+| `NOT_FOUND`, GQ-03 | The FDA nitrosamine guidance is the right document (September 2024, Revision 2). NDMA and NDEA appear together only on page 10, and "ng/day" is not on that page, while "26.5" appears on pages 18 and 45. The question's pattern needs all three terms on one page, so the pattern needs fixing by its owner |
+| `NOT_FOUND`, GQ-06 | The 2018 FDA guidance (page 8) says the dissolution criterion is "Q=80% in 30 minutes"; the question's pattern and its draft answer say 85%. The question needs fixing by its owner |
+| `DOC_MISSING` | GQ-11 (needs the deferred `IN-SCHEDM-2023`), GQ-12, GQ-13 (need the deferred `IN-NDCT-2019`) |
 
-No question was marked `CHECK`. The questions have not been edited. The checker reads the question file, not the manifest, so it keeps reporting `DOC_MISSING` for the five questions that depend on deferred documents. Those five cannot be answered or scored until the documents are restored, or the questions are changed or dropped by their owner.
+No question was marked `CHECK`. The questions have not been edited. The checker reads the question file, not the manifest. The three questions that depend on deferred documents cannot be answered or scored until the correct PDFs are saved, or the questions are changed or dropped by their owner.
 
 ## Built-in test cases
 
-- **Near-identical codes:** Q3C vs Q3D. NDMA vs NDEA is deferred with the FDA nitrosamine guidance.
-- **Table values:** PDE tables (Q3D) and solvent classes (Q3C). The acceptable-intake tables (FDA nitrosamine) are deferred.
-- **Statutory text (deferred):** the NDCT Rules and Schedule M have a very different structure from guidance, so they would test structure-aware chunking. Not available until the Gazette PDFs are restored.
+- **Near-identical codes:** Q3C vs Q3D; NDMA vs NDEA.
+- **Table values:** PDE tables (Q3D), solvent classes (Q3C), acceptable-intake tables (FDA nitrosamine).
+- **Statutory text (deferred):** the NDCT Rules and Schedule M have a very different structure from guidance, so they would test structure-aware chunking. Not available until the correct Gazette PDFs are saved.
 - **Version trap (deferred):** the NDCT text predates later amendments; answers must say so (GQ-13).
 - **Deliberate gaps:** no India-specific stability condition (the ICH Q1A(R2) it would defer to is on hold) and no IP monographs; answers must say "not covered".
-- **Older PDFs:** the 1997 FDA dissolution guidance was suspected to need OCR (reading text from scanned images). The 25 Oct 2026 run found a text layer on all 12 downloaded PDFs, including this one, so OCR is not needed for them.
+- **Older PDFs:** the 1997 FDA dissolution guidance was suspected to need OCR (reading text from scanned images). The runs on 25-26 Oct 2026 found a text layer on all 13 corpus PDFs, including this one, so OCR is not needed for them.
 
 ## Gaps still open
 
 - **Scientific literature:** none in the corpus. Add 3–5 articles whose licence is plain CC BY, checking each article's own licence line. Many journals use CC BY-NC-ND, which does not fit.
-- **Indian rules:** Schedule M and the NDCT Rules are deferred, so the corpus has no Indian document. Restore them (see Deferred) before testing India-specific questions.
-- **Nitrosamine limits:** the FDA nitrosamine guidance is deferred, so questions about NDMA and NDEA limits cannot be tested yet.
+- **Indian rules:** Schedule M and the NDCT Rules are deferred, so the corpus has no Indian document. Save the correct PDFs (see Deferred) before testing India-specific questions.
 - **Pilot product:** product-specific sources need a chosen product.
 - **Stability for India:** the ICH Q1A(R2) and WHO documents that would answer this are on hold. Ask the client for access or approval.
 
 ## Check before ingesting
 
-- [ ] Run the fetch script: 12 automatic downloads. The 3 deferred documents are skipped.
+- [ ] Run the fetch script: 12 automatic downloads, plus `FDA-NITRO-2024` saved by hand. The 2 deferred documents are skipped.
 - [ ] Open page 2 of one ICH PDF and confirm the legal notice reads as described.
 - [ ] Open each PDF's first page and confirm title and version match the manifest.
 - [ ] Run `python evals/verify_questions.py`; fix every `NOT_FOUND` and `DOC_MISSING`; look at every `CHECK`.
