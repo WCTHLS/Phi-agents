@@ -10,8 +10,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from pharma_ai.core.config import settings
-from pharma_ai.infrastructure.security.auth import DEV_ALLOWED_ENVIRONMENTS
-from scripts.dev_token import mint_dev_token
+from pharma_ai.infrastructure.security.auth import DEV_ALLOWED_ENVIRONMENTS, mint_dev_token
 
 auth_router = APIRouter()
 

@@ -16,50 +16,12 @@ is set (the same rules the API itself applies). It cannot make a token for a rea
 
 import argparse
 import sys
-import time
 from pathlib import Path
-
-import jwt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from pharma_ai.core.config import Settings, settings
-from pharma_ai.infrastructure.security.auth import DEV_ALLOWED_ENVIRONMENTS
-
-
-def mint_dev_token(
-    cfg: Settings,
-    *,
-    sub: str,
-    email: str | None,
-    roles: list[str],
-    projects: list[str],
-    minutes: int = 60,
-) -> str:
-    """A token the API accepts in dev mode. Raises ValueError if dev tokens are not allowed."""
-    if cfg.auth_mode != "dev":
-        raise ValueError(
-            "AUTH_MODE is not 'dev'. Set AUTH_MODE=dev in .env (see scripts/make_env.py)."
-        )
-    if cfg.environment not in DEV_ALLOWED_ENVIRONMENTS:
-        raise ValueError(
-            f"Refusing: ENVIRONMENT is {cfg.environment!r}; dev tokens are for local or test only."
-        )
-    if not cfg.auth_dev_secret:
-        raise ValueError("AUTH_DEV_SECRET is not set. Run scripts/make_env.py or set it in .env.")
-    if minutes < 1:
-        raise ValueError("minutes must be at least 1")
-    now = int(time.time())
-    claims = {
-        "sub": sub,
-        "iss": cfg.oidc_issuer_url,
-        "iat": now,
-        "exp": now + minutes * 60,
-        "email": email or f"{sub}@pharma.local",
-        "realm_access": {"roles": roles},
-        "projects": projects,
-    }
-    return jwt.encode(claims, cfg.auth_dev_secret, algorithm="HS256")
+from pharma_ai.core.config import settings
+from pharma_ai.infrastructure.security.auth import mint_dev_token
 
 
 def main(argv: list[str] | None = None) -> int:

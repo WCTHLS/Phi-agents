@@ -14,6 +14,7 @@ Every verified token must carry ``sub``, ``iss``, ``iat`` and ``exp``, and its i
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Annotated, Any
@@ -172,3 +173,38 @@ def ensure_project_access(principal: Principal, project_id: str) -> None:
     """Object-level check: raise 403 unless the caller is a member of ``project_id``."""
     if not principal.can_access_project(project_id):
         raise _forbidden("Not authorized for this project")
+
+
+def mint_dev_token(
+    cfg: Settings,
+    *,
+    sub: str,
+    email: str | None = None,
+    roles: list[str],
+    projects: list[str],
+    minutes: int = 60,
+) -> str:
+    """A token the API accepts in dev mode. Raises ValueError if dev tokens are not allowed."""
+    if cfg.auth_mode != "dev":
+        raise ValueError(
+            "AUTH_MODE is not 'dev'. Set AUTH_MODE=dev in .env (see scripts/make_env.py)."
+        )
+    if cfg.environment not in DEV_ALLOWED_ENVIRONMENTS:
+        raise ValueError(
+            f"Refusing: ENVIRONMENT is {cfg.environment!r}; dev tokens are for local or test only."
+        )
+    if not cfg.auth_dev_secret:
+        raise ValueError("AUTH_DEV_SECRET is not set. Run scripts/make_env.py or set it in .env.")
+    if minutes < 1:
+        raise ValueError("minutes must be at least 1")
+    now = int(time.time())
+    claims = {
+        "sub": sub,
+        "iss": cfg.oidc_issuer_url,
+        "iat": now,
+        "exp": now + minutes * 60,
+        "email": email or f"{sub}@pharma.local",
+        "realm_access": {"roles": roles},
+        "projects": projects,
+    }
+    return jwt.encode(claims, cfg.auth_dev_secret, algorithm="HS256")
