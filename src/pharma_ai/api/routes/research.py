@@ -9,6 +9,7 @@ from pharma_ai.features.research.schemas import (
     ResearchResponse,
 )
 from pharma_ai.features.research.source_registry import get_approved_documents
+from pharma_ai.infrastructure.audit.recorder import AuditRecorderDep, fingerprint_text
 from pharma_ai.infrastructure.security.auth import get_current_principal
 
 # Every research endpoint requires an authenticated caller (401 otherwise).
@@ -26,9 +27,11 @@ _answering_service = ResearchAnsweringService()
     summary="List approved regulatory sources",
     description="Returns all verified, versioned regulatory documents and guidelines with SHA-256 hashes.",
 )
-def list_approved_sources() -> list[DocumentMetadata]:
+def list_approved_sources(audit: AuditRecorderDep) -> list[DocumentMetadata]:
     """Retrieve metadata of all approved sources in the registry."""
-    return get_approved_documents()
+    sources = get_approved_documents()
+    audit.success("RESEARCH_SOURCES_LISTED", "source_register", details={"count": len(sources)})
+    return sources
 
 
 @router.post(
@@ -37,12 +40,36 @@ def list_approved_sources() -> list[DocumentMetadata]:
     summary="Query regulatory evidence with strict citations",
     description="Queries the approved regulatory knowledge base, returning grounded answers with page-level citations.",
 )
-def query_regulatory_research(query: ResearchQuery) -> ResearchResponse:
-    """Execute a grounded regulatory query against approved source evidence."""
+def query_regulatory_research(query: ResearchQuery, audit: AuditRecorderDep) -> ResearchResponse:
+    """Execute a grounded regulatory query against approved source evidence.
+
+    The audit record holds a fingerprint of the question, not the question: it may contain
+    confidential product details, and the audit trail can never be edited or deleted.
+    """
     try:
-        return _answering_service.answer_query(query)
+        response = _answering_service.answer_query(query)
     except Exception as exc:
+        audit.failure(
+            "RESEARCH_QUERY_EXECUTED",
+            "research_query",
+            details={"query": fingerprint_text(query.query), "error_type": type(exc).__name__},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred while processing research query: {exc!s}",
         ) from exc
+    audit.success(
+        "RESEARCH_QUERY_EXECUTED",
+        "research_query",
+        details={
+            "query": fingerprint_text(query.query),
+            "top_k": query.top_k,
+            "strict_citation_mode": query.strict_citation_mode,
+            "publisher_filter": query.publisher_filter,
+            "retrieved_source_ids": sorted({c.source_id for c in response.retrieved_evidence}),
+            "citation_count": len(response.citations),
+            "evidence_gap_count": len(response.evidence_gaps),
+            "verified": response.verified,
+        },
+    )
+    return response

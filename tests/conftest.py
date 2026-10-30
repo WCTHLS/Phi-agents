@@ -18,6 +18,7 @@ os.environ["ENVIRONMENT"] = "test"
 os.environ["AUTH_MODE"] = "dev"
 os.environ["AUTH_DEV_SECRET"] = TEST_DEV_SECRET
 os.environ["OIDC_ISSUER_URL"] = TEST_ISSUER
+os.environ["AUDIT_BACKEND"] = "memory"
 
 
 def mint_token(
@@ -40,6 +41,16 @@ def mint_token(
         "projects": projects if projects is not None else ["PRJ-001"],
     }
     return jwt.encode(claims, secret, algorithm="HS256")
+
+
+@pytest.fixture(autouse=True)
+def fresh_audit_trail():
+    """Every test starts with an empty in-memory audit trail."""
+    from pharma_ai.infrastructure.audit.service import reset_audit_service
+
+    reset_audit_service()
+    yield
+    reset_audit_service()
 
 
 @pytest.fixture

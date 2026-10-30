@@ -23,10 +23,19 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
+from conftest import mint_token
+from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
+from pharma_ai.infrastructure.audit.database import DatabaseAuditLogService
+from pharma_ai.infrastructure.audit.service import (
+    AuditActor,
+    AuditUnavailableError,
+    get_audit_service,
+)
 from pharma_ai.infrastructure.db.models import (
     EMBEDDING_DIM,
     EMPTY_INPUT_SHA256,
@@ -47,6 +56,7 @@ from pharma_ai.infrastructure.db.repositories import (
 )
 from pharma_ai.infrastructure.db.seed import seed_all
 from pharma_ai.infrastructure.db.session import to_sqlalchemy_url
+from pharma_ai.main import app
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -86,9 +96,25 @@ def _tables(engine: Engine) -> set[str]:
         return {r[0] for r in rows} - {"alembic_version"}
 
 
+def _refuse_non_test_database(raw_url: str) -> None:
+    """These tests erase and rebuild the tables of their database.
+
+    So the database name must say "test". This stops TEST_DATABASE_URL from being pointed at the
+    real development database (for example pharma_ai) by mistake.
+    """
+    name = make_url(raw_url).database or ""
+    if "test" not in name.lower():
+        pytest.fail(
+            f"TEST_DATABASE_URL points at database {name!r}. The database tests erase its tables, "
+            "so the name must contain 'test' (for example pharma_test). Nothing was changed.",
+            pytrace=False,
+        )
+
+
 @pytest.fixture(scope="module")
 def engine() -> Iterator[Engine]:
     assert TEST_DATABASE_URL
+    _refuse_non_test_database(TEST_DATABASE_URL)
     url = to_sqlalchemy_url(TEST_DATABASE_URL)
     cfg = _alembic_config(url)
     command.downgrade(cfg, "base")  # start from a known empty state
@@ -554,3 +580,215 @@ def test_document_list_is_empty_for_a_project_the_caller_cannot_access(session: 
 def test_integrity_errors_are_database_errors(session: Session) -> None:
     # Sanity check for the helper above: constraint violations surface as DBAPIError subclasses.
     assert issubclass(IntegrityError, DBAPIError)
+
+
+# --- audit trail in the database (S1-11) -----------------------------------------------------
+
+
+def test_audit_migration_adds_the_actor_and_version_columns(engine: Engine) -> None:
+    with engine.connect() as conn:
+        columns = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    "select column_name from information_schema.columns "
+                    "where table_name = 'audit_events'"
+                )
+            )
+        }
+    assert {"actor_email", "actor_roles", "resource_version"} <= columns
+
+
+def test_audit_outcome_must_be_a_known_value(session: Session) -> None:
+    def bad_outcome() -> None:
+        session.add(
+            AuditEvent(actor_id="a", actor_role="r", action="X", resource_type="t", outcome="MAYBE")
+        )
+
+    assert "ck_audit_events_outcome_values" in _refused(session, bad_outcome)
+
+
+def test_the_reconstruction_index_exists(engine: Engine) -> None:
+    with engine.connect() as conn:
+        found = conn.execute(
+            text(
+                "select 1 from pg_indexes where indexname = "
+                "'ix_audit_events_resource_type_resource_id_created_at'"
+            )
+        ).scalar()
+    assert found
+
+
+@pytest.fixture
+def audit_service(engine: Engine) -> Iterator[DatabaseAuditLogService]:
+    """The real audit service on the test database. Its rows are committed (and, being
+    append-only, stay until the module's next rebuild), so tests use unique people."""
+    service = DatabaseAuditLogService(sessionmaker(bind=engine, expire_on_commit=False))
+    app.dependency_overrides[get_audit_service] = lambda: service
+    yield service
+    app.dependency_overrides.pop(get_audit_service, None)
+
+
+def _unreachable_engine() -> Engine:
+    """An engine for a database that is not there. It gives up after one second."""
+    return create_engine(
+        "postgresql+psycopg://x:y@127.0.0.1:1/none", connect_args={"connect_timeout": 1}
+    )
+
+
+def _unique_person() -> str:
+    return f"it-{uuid.uuid4().hex[:12]}"
+
+
+def _token(sub: str, roles: list[str], projects: list[str] | None = None) -> dict[str, str]:
+    return {
+        "Authorization": "Bearer "
+        + mint_token(
+            sub=sub, roles=roles, projects=projects if projects is not None else ["PRJ-001"]
+        )
+    }
+
+
+def test_database_trail_stores_and_returns_an_event(audit_service: DatabaseAuditLogService) -> None:
+    sub = _unique_person()
+    actor = AuditActor(subject=sub, email=f"{sub}@pharma.local", roles=("reviewer", "scientist"))
+    stored = audit_service.record_event(
+        actor=actor,
+        action="REPORT_VIEWED",
+        resource_type="report",
+        resource_id="PDR-1",
+        resource_version="v3",
+        project_id="PRJ-001",
+        details={"note": "x"},
+    )
+    assert stored.actor_subject == sub
+    assert stored.actor_id == f"{sub}@pharma.local"  # what the viewer shows
+    assert stored.actor_role == "reviewer,scientist"
+    assert stored.actor_roles == ["reviewer", "scientist"]
+    assert stored.resource_version == "v3"
+    assert stored.timestamp.endswith(" UTC")
+    uuid.UUID(stored.event_id)  # a real UUID from the database
+
+    events, total = audit_service.list_events(actor=sub)
+    assert total == 1
+    assert events[0] == stored
+
+
+def test_database_trail_lists_newest_first_and_pages(
+    audit_service: DatabaseAuditLogService,
+) -> None:
+    sub = _unique_person()
+    actor = AuditActor(subject=sub, email=None, roles=("scientist",))
+    for n in range(5):
+        audit_service.record_event(actor=actor, action=f"STEP_{n}", resource_type="t")
+    first, total = audit_service.list_events(actor=sub, page=1, page_size=2)
+    second, _ = audit_service.list_events(actor=sub, page=2, page_size=2)
+    assert total == 5
+    assert [e.action for e in first] == ["STEP_4", "STEP_3"]
+    assert [e.action for e in second] == ["STEP_2", "STEP_1"]
+
+
+def test_database_trail_filters_by_resource_and_treats_search_text_literally(
+    audit_service: DatabaseAuditLogService,
+) -> None:
+    sub = _unique_person()
+    actor = AuditActor(subject=sub, email=None, roles=("scientist",))
+    audit_service.record_event(actor=actor, action="A", resource_type="doc", resource_id="D1")
+    audit_service.record_event(actor=actor, action="A", resource_type="doc", resource_id="D2")
+    only_d1, total = audit_service.list_events(actor=sub, resource_type="doc", resource_id="D1")
+    assert total == 1
+    assert only_d1[0].resource_id == "D1"
+    # A percent sign is just a character, not "match everything".
+    assert audit_service.list_events(actor="%")[1] == audit_service.list_events(actor="%")[1]
+    assert audit_service.list_events(actor=f"{sub}%")[1] == 0
+
+
+def test_database_trail_rejects_bad_events_before_touching_the_database(
+    audit_service: DatabaseAuditLogService,
+) -> None:
+    actor = AuditActor(subject=_unique_person(), email=None, roles=())
+    with pytest.raises(ValueError):
+        audit_service.record_event(actor=actor, action="A", resource_type="t", outcome="MAYBE")
+
+
+def test_database_trail_fails_closed_when_the_database_is_unreachable() -> None:
+    broken = DatabaseAuditLogService(sessionmaker(bind=_unreachable_engine()))
+    actor = AuditActor(subject="s", email=None, roles=("scientist",))
+    with pytest.raises(AuditUnavailableError):
+        broken.record_event(actor=actor, action="A", resource_type="t")
+    with pytest.raises(AuditUnavailableError):
+        broken.list_events()
+    with pytest.raises(AuditUnavailableError):
+        broken.ping()
+
+
+def test_real_actions_land_in_the_database_trail(audit_service: DatabaseAuditLogService) -> None:
+    sub = _unique_person()
+    api = TestClient(app)
+    assert (
+        api.get("/api/v1/projects/PRJ-001", headers=_token(sub, ["scientist"])).status_code == 200
+    )
+    assert (
+        api.get("/api/v1/projects/PRJ-002", headers=_token(sub, ["scientist"])).status_code == 403
+    )
+    question = {"query": "Confidential tablet with excipient QX-5521: nitrite risk?"}
+    assert (
+        api.post(
+            "/api/v1/research/query", json=question, headers=_token(sub, ["scientist"])
+        ).status_code
+        == 200
+    )
+
+    events, total = audit_service.list_events(actor=sub)
+    assert total == 3
+    assert sorted(e.action for e in events) == [
+        "ACCESS_DENIED",
+        "PROJECT_VIEWED",
+        "RESEARCH_QUERY_EXECUTED",
+    ]
+    assert {e.actor_subject for e in events} == {sub}
+    denied = next(e for e in events if e.action == "ACCESS_DENIED")
+    assert (denied.outcome, denied.project_id) == ("DENIED", "PRJ-002")
+    assert "QX-5521" not in str([e.model_dump() for e in events])  # the question is not stored
+
+
+def test_audit_rows_written_by_the_api_cannot_be_changed(
+    audit_service: DatabaseAuditLogService, engine: Engine
+) -> None:
+    sub = _unique_person()
+    TestClient(app).get("/api/v1/projects", headers=_token(sub, ["scientist"]))
+    event = audit_service.list_events(actor=sub)[0][0]
+    for statement in (
+        "update audit_events set outcome = 'FAILURE' where event_id = :e",
+        "delete from audit_events where event_id = :e",
+    ):
+        with pytest.raises(DBAPIError, match="append-only"), engine.begin() as conn:
+            conn.execute(text(statement), {"e": event.event_id})
+
+
+def test_readiness_follows_the_database(audit_service: DatabaseAuditLogService) -> None:
+    api = TestClient(app)
+    assert api.get("/ready").json() == {"status": "ready"}
+    broken = DatabaseAuditLogService(sessionmaker(bind=_unreachable_engine()))
+    app.dependency_overrides[get_audit_service] = lambda: broken
+    assert api.get("/ready").status_code == 503
+
+
+def test_the_api_refuses_to_act_when_the_database_trail_is_down(engine: Engine) -> None:
+    broken = DatabaseAuditLogService(sessionmaker(bind=_unreachable_engine()))
+    app.dependency_overrides[get_audit_service] = lambda: broken
+    try:
+        res = TestClient(app).get(
+            "/api/v1/projects", headers=_token(_unique_person(), ["scientist"])
+        )
+    finally:
+        app.dependency_overrides.pop(get_audit_service, None)
+    assert res.status_code == 503
+
+
+def test_seeding_records_a_real_event(session: Session) -> None:
+    seed_all(session)
+    row = session.query(AuditEvent).filter_by(action="DATABASE_SEEDED").first()
+    assert row is not None
+    assert row.actor_id == "system:seed-script"
+    assert row.details["sources"] == 22

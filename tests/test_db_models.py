@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from pgvector.sqlalchemy import Vector
 
+from pharma_ai.infrastructure.db import session as db_session
 from pharma_ai.infrastructure.db.models import (
     EMBEDDING_DIM,
     EMPTY_INPUT_SHA256,
@@ -147,3 +148,11 @@ def test_only_the_value_yes_counts_as_eligible(
         HEADER + f"X-1,T,AUTH,,v1,,,UC-01,,,lic,,attr,{eligible_cell},,,,,core\n", encoding="utf-8"
     )
     assert read_manifest(csv_file)[0]["eligible"] is expected
+
+
+def test_database_connections_have_a_time_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a limit, a database host that stops answering can hold a request for minutes."""
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(db_session, "create_engine", lambda url, **kwargs: captured.update(kwargs))
+    db_session.make_engine("postgresql://u:p@db.example/pharma")
+    assert 0 < captured["connect_args"]["connect_timeout"] <= 10  # type: ignore[index]

@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://pharma_ai:change_me_local_only@localhost:5432/pharma_ai"
     tika_url: str = "http://localhost:9998"
 
+    # Where the audit trail is stored (S1-11). "memory" is for tests and database-less local runs
+    # and is refused unless ENVIRONMENT is local or test.
+    audit_backend: Literal["database", "memory"] = "database"
+
     # Authentication (S1-09). "oidc" verifies RS256 tokens from the identity provider's JWKS.
     # "dev" verifies HS256 tokens signed with AUTH_DEV_SECRET and is refused outside local/test.
     auth_mode: Literal["oidc", "dev"] = "oidc"

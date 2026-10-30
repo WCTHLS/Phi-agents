@@ -78,11 +78,16 @@ erDiagram
     }
     audit_events {
         uuid event_id PK
-        string actor_id
-        string actor_role
+        string actor_id "stable subject ID from the login token"
+        string actor_email
+        string actor_role "all roles, joined for display"
+        string[] actor_roles
         string project_id "plain text, no foreign key"
         string action
-        string outcome
+        string resource_type
+        string resource_id
+        string resource_version
+        string outcome "SUCCESS, DENIED or FAILURE"
         jsonb details
     }
 ```
@@ -99,6 +104,8 @@ erDiagram
 | Each chunk belongs to one version, in order | S2-06 | Unique `(version_id, chunk_index)`; page range check (`page_end >= page_start`). |
 | A vector always records which model made it | ADR-003 | Check: `embedding` and `embedding_model` are both set or both empty. |
 | Audit records cannot be altered | PRD FR-30, NFR-07 | Triggers refuse UPDATE, DELETE and TRUNCATE on `audit_events`. |
+| Audit outcomes are a fixed set | S1-11 | Check: `outcome` is SUCCESS, DENIED or FAILURE. |
+| Audit records are written by the server | S1-11, ADR-005 | The API records events from the verified login token; there is no endpoint for a client to write one. |
 | Retrieval is limited to the caller's projects | PRD FR-10, NFR-06 | `ChunkRepository.search_nearest` applies the project filter and the eligibility check in the same SQL statement as the vector search. No allowed projects means no results. |
 
 ## Limits to know about

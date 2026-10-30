@@ -20,8 +20,18 @@ def to_sqlalchemy_url(url: str) -> str:
     return url
 
 
+# How long to wait for the database before giving up. Without a limit, a database host that stops
+# answering can hold a request open for minutes (seen on Windows); the audit trail must fail
+# closed quickly instead.
+CONNECT_TIMEOUT_SECONDS = 5
+
+
 def make_engine(url: str | None = None) -> Engine:
-    return create_engine(to_sqlalchemy_url(url or settings.database_url), pool_pre_ping=True)
+    return create_engine(
+        to_sqlalchemy_url(url or settings.database_url),
+        pool_pre_ping=True,
+        connect_args={"connect_timeout": CONNECT_TIMEOUT_SECONDS},
+    )
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:

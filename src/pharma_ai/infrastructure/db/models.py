@@ -307,18 +307,31 @@ class AuditEvent(Base):
     event_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=_NEW_UUID
     )
+    # The login token's stable subject ID. The email is kept separately because it can change.
     actor_id: Mapped[str] = mapped_column(String(128))
-    actor_role: Mapped[str] = mapped_column(String(64))
+    actor_email: Mapped[str | None] = mapped_column(String(320))
+    actor_role: Mapped[str] = mapped_column(String(64))  # all roles, joined for display
+    actor_roles: Mapped[list[str]] = mapped_column(
+        ARRAY(String), server_default=text("'{}'::varchar[]")
+    )
     # Plain text, no foreign key: an audit record must survive even if a project is removed.
     project_id: Mapped[str | None] = mapped_column(String(64))
     action: Mapped[str] = mapped_column(String(128))
     resource_type: Mapped[str] = mapped_column(String(64))
     resource_id: Mapped[str | None] = mapped_column(String(128))
+    resource_version: Mapped[str | None] = mapped_column(String(64))
     outcome: Mapped[str] = mapped_column(String(32), server_default=text("'SUCCESS'"))
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_NOW)
 
     __table_args__ = (
+        CheckConstraint("outcome IN ('SUCCESS', 'DENIED', 'FAILURE')", name="outcome_values"),
+        Index(
+            "ix_audit_events_resource_type_resource_id_created_at",
+            "resource_type",
+            "resource_id",
+            "created_at",
+        ),
         Index("ix_audit_events_created_at", "created_at"),
         Index("ix_audit_events_project_id_created_at", "project_id", "created_at"),
         Index("ix_audit_events_action", "action"),

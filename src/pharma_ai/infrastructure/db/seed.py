@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from pharma_ai.infrastructure.db.models import ROLE_KEYS, Project, Role, Source
+from pharma_ai.infrastructure.db.models import ROLE_KEYS, AuditEvent, Project, Role, Source
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_MANIFEST = REPO_ROOT / "data" / "sources" / "corpus_manifest.csv"
@@ -108,5 +108,18 @@ def seed_all(session: Session, manifest: Path = DEFAULT_MANIFEST) -> dict[str, i
     seed_roles(session)
     seed_projects(session)
     count = seed_sources(session, read_manifest(manifest))
+    counts = {"roles": len(ROLE_KEYS), "projects": len(SAMPLE_PROJECTS), "sources": count}
+    # A real record that this data was loaded (replaces the invented sample history).
+    session.add(
+        AuditEvent(
+            actor_id="system:seed-script",
+            actor_role="system",
+            actor_roles=["system"],
+            action="DATABASE_SEEDED",
+            resource_type="database",
+            outcome="SUCCESS",
+            details={**counts, "manifest": manifest.name},
+        )
+    )
     session.commit()
-    return {"roles": len(ROLE_KEYS), "projects": len(SAMPLE_PROJECTS), "sources": count}
+    return counts

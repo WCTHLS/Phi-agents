@@ -19,7 +19,7 @@ from functools import lru_cache
 from typing import Annotated, Any
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from pharma_ai.core.config import Settings, settings
@@ -140,6 +140,7 @@ def principal_from_claims(claims: dict[str, Any]) -> Principal:
 
 
 def get_current_principal(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
     verifier: Annotated[TokenVerifier, Depends(get_token_verifier)],
 ) -> Principal:
@@ -147,7 +148,10 @@ def get_current_principal(
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise _unauthorized()
     claims = verifier.verify(credentials.credentials)
-    return principal_from_claims(claims)
+    principal = principal_from_claims(claims)
+    # Remembered for this request only, so a later 403 can be written to the audit trail.
+    request.state.principal = principal
+    return principal
 
 
 CurrentPrincipal = Annotated[Principal, Depends(get_current_principal)]
