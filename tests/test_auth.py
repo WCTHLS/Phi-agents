@@ -120,3 +120,16 @@ def test_dev_mode_requires_a_secret() -> None:
     cfg = Settings(environment="local", auth_mode="dev", auth_dev_secret=None)
     with pytest.raises(AuthConfigurationError):
         TokenVerifier(cfg)
+
+
+def test_dev_token_endpoint_mints_valid_token() -> None:
+    response = client.post(
+        "/api/v1/auth/dev-token", json={"role": "scientist", "projects": ["PRJ-001"]}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "access_token" in data
+    token = data["access_token"]
+    # Verify the minted token works on a protected endpoint
+    res = client.get("/api/v1/projects/PRJ-001", headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 200

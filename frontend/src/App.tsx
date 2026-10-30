@@ -4,11 +4,10 @@ import {
   DocumentMetadata,
   fetchApprovedSources,
   fetchAuditEvents,
-  recordAuditEvent,
   ResearchResponse,
   submitResearchQuery,
 } from "./api/client";
-import { createDevSession, OidcSession, UserRole } from "./auth/oidc";
+import { createDevSession, OidcSession, requestDevToken, UserRole } from "./auth/oidc";
 
 export type WorkspaceTab = "research" | "trials" | "reports" | "audit";
 
@@ -122,6 +121,22 @@ export function App(): React.ReactElement {
     "All cited limits match FDA-2020-D-1530 Rev 1 (p. 10) and ICH Q3D(R2) (p. 12)."
   );
 
+
+  // Automatically acquire a genuine signed dev JWT from the API backend
+  useEffect(() => {
+    let mounted = true;
+    if (session?.role) {
+      requestDevToken(session.role, [selectedProject]).then((token) => {
+        if (mounted && token && token !== session.accessToken) {
+          setSession((prev) => (prev ? { ...prev, accessToken: token } : null));
+        }
+      });
+    }
+    return () => {
+      mounted = false;
+    };
+  }, [session?.role, selectedProject]);
+
   // Audit Viewer Filter state
   const [auditLogs, setAuditLogs] = useState<AuditRecord[]>(INITIAL_AUDIT_LOGS);
   const [filterProject, setFilterProject] = useState<string>("ALL");
@@ -234,7 +249,7 @@ export function App(): React.ReactElement {
     setReportStatus(decision);
     const action = decision === "APPROVED" ? "REPORT_SECTION_APPROVED" : "REPORT_EVIDENCE_REQUESTED";
     const newEntry: AuditRecord = {
-      id: `AUD-${1005 + auditLogs.length}`,
+      id: crypto.randomUUID(),
       timestamp: new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC",
       actor: session.email,
       role: session.role,
@@ -244,22 +259,6 @@ export function App(): React.ReactElement {
       details: reviewRationale || "Scientist review decision recorded",
     };
     setAuditLogs([newEntry, ...auditLogs]);
-
-    if (session.accessToken) {
-      recordAuditEvent(
-        {
-          action,
-          resource_type: "report_section",
-          resource_id: "PDR-3.2.P.2-v1.3",
-          project_id: selectedProject,
-          outcome: "SUCCESS",
-          details: { rationale: reviewRationale },
-        },
-        session.accessToken
-      ).catch(() => {
-        // Tolerant to offline dev server
-      });
-    }
   }
 
   const filteredAuditLogs = auditLogs.filter((item) => {

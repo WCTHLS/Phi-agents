@@ -14,7 +14,7 @@
 | **UI Shell with 3 Scientist Workspaces** | **PASS** | React + Vite UI shell supporting Research & Strategy, Trial Verification & DOE, and Report Review Studio. |
 | **Authorized API Call** | **PASS** | JWT-authenticated requests to `/api/v1/projects` and `/api/v1/research/query` with role & project claims. |
 | **Audit Entry Visible in UI** | **PASS** | Append-only `/api/v1/audit/events` table with live project, action, and actor filtering. |
-| **Negative Auth Tests Green in CI** | **PASS** | 45 automated tests passing in CI (cross-project 403, unknown project probe 403, unauthenticated 401). |
+| **Negative Auth Tests Green in CI** | **PASS** | 176 automated tests passing (pgvector schema, migrations, negative auth, audit immutability, smoke tests) (cross-project 403, unknown project probe 403, unauthenticated 401). |
 
 ---
 
@@ -65,7 +65,7 @@
 * **Solid Zero-Hallucination Foundation:** Implemented strict citation schemas preventing ungrounded model outputs from being presented to scientists.
 * **Rapid CI/CD & Security Baseline:** Gitleaks, Ruff, Pytest, dependency licensing, and Vite builds all integrated from Day 1.
 * **High-Contrast Accessible UI:** Clean, WCAG AA/AAA-compliant design built specifically for laboratory and regulatory environments.
-* **45 Automated Regression Tests:** Instant test execution (< 1 second) providing confident refactoring.
+* **176 Automated Regression Tests:** Instant test execution against a real PostgreSQL + pgvector database providing confident refactoring.
 
 ### Areas for Improvement / Insights
 * **Local Subprocess Socket Isolation on Windows:** Required configuring dedicated `.venv` and setting explicit loopback bindings.

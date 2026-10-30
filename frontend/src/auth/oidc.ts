@@ -89,3 +89,25 @@ export function createDevSession(role: UserRole = "scientist"): OidcSession {
     expiresAt: Date.now() + 3600 * 1000,
   };
 }
+
+
+export async function requestDevToken(
+  role: UserRole = "scientist",
+  projects: string[] = ["PRJ-001", "PRJ-002"]
+): Promise<string | null> {
+  try {
+    const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
+    const res = await fetch(`${apiBase}/api/v1/auth/dev-token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role, projects }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return (data.access_token as string) || null;
+    }
+  } catch {
+    // Offline or dev token endpoint unavailable
+  }
+  return null;
+}
