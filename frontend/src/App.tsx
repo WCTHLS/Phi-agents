@@ -309,7 +309,7 @@ export function App(): React.ReactElement {
                 >
                   <option value="scientist">Scientist (Dr. Thorne)</option>
                   <option value="reviewer">QA Reviewer (Dr. Vance)</option>
-                  <option value="admin">Admin (Nivas M.)</option>
+                  <option value="admin">Admin (Platform Administrator)</option>
                 </select>
               </label>
               <button

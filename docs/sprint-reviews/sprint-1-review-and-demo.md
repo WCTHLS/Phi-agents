@@ -1,7 +1,7 @@
 # Sprint 1 Review, Demo & Retrospective Guide (`S1-15`)
 
 **Sprint Period:** 26 Oct 2026 – 30 Oct 2026  
-**Team:** Krishna (Backend, AI & Data) & Nivas (Frontend, Platform & DevOps)  
+**Team:** Backend, AI & Data developer; Frontend, Platform & DevOps developer  
 **Sprint Goal:** Phase 0 "Align & prepare" + platform foundation: repository & CI pipeline, containerized dev environment, React/Vite UI shell, FastAPI skeleton, OIDC SSO, PostgreSQL/pgvector schema, immutable audit trail, and project/role-based authorization.
 
 ---

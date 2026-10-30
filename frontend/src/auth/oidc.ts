@@ -72,7 +72,7 @@ export function createDevSession(role: UserRole = "scientist"): OidcSession {
       projects: ["PRJ-001", "PRJ-002"],
     },
     admin: {
-      name: "Nivas M. (Platform & Compliance Admin)",
+      name: "Platform & Compliance Administrator",
       email: "admin@pharma.local",
       projects: ["PRJ-001", "PRJ-002"],
     },

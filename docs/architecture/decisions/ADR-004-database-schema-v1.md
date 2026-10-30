@@ -1,6 +1,6 @@
 # ADR-004: Database schema v1 and how the licence rule is enforced
 
-- **Status:** Proposed (S1-07). Needs review by Nivas, because it replaces the tables in `scripts/init-db.sql` and changes how the database is created.
+- **Status:** Proposed (S1-07). Needs review by the developer who owns the platform and DevOps setup, because it replaces the tables in `scripts/init-db.sql` and changes how the database is created.
 - **Decision:**
   - Use SQLAlchemy 2 models and Alembic migrations (up and down) on PostgreSQL with the pgvector extension. The migration `migrations/versions/0001_schema_v1.py` is the authoritative schema; a test fails if the models differ from it. Tables and rules are listed in [erd.md](../erd.md).
   - `sources` replaces `approved_sources`. It is filled from `data/sources/corpus_manifest.csv`, so the database and the manifest cannot disagree about which documents are eligible (ADR-002). No document hashes are seeded: a real SHA-256 exists only once a file has been ingested.
