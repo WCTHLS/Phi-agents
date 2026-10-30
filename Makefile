@@ -1,7 +1,7 @@
 # Makefile for Pharma AI Platform (Podman Compose / Docker Compose compatible)
 COMPOSE ?= $(shell if command -v podman >/dev/null 2>&1; then echo "podman compose"; else echo "docker compose"; fi)
 
-.PHONY: up down logs ps test lint env
+.PHONY: up down logs ps test lint env migrate seed
 
 env:
 	@if [ ! -f .env ]; then cp .env.example .env && echo "Created .env from .env.example"; fi
@@ -17,6 +17,12 @@ logs:
 
 ps:
 	$(COMPOSE) ps
+
+migrate:
+	alembic upgrade head
+
+seed:
+	python scripts/seed_dev_data.py
 
 test:
 	pytest -v

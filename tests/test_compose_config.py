@@ -23,17 +23,17 @@ def test_compose_file_defines_required_services() -> None:
         assert "healthcheck" in services[svc_name], f"Missing healthcheck in service: {svc_name}"
 
 
-def test_init_db_seed_script_exists_and_creates_core_tables() -> None:
-    """Verify scripts/init-db.sql defines vector extension, core tables, and seed records."""
+def test_init_db_script_enables_extensions_and_leaves_tables_to_migrations() -> None:
+    """scripts/init-db.sql only enables extensions; Alembic migrations create the tables (S1-07)."""
     sql_path = REPO_ROOT / "scripts" / "init-db.sql"
     assert sql_path.exists()
 
     sql_text = sql_path.read_text(encoding="utf-8")
     assert "CREATE EXTENSION IF NOT EXISTS vector;" in sql_text
-    assert "CREATE TABLE IF NOT EXISTS projects" in sql_text
-    assert "CREATE TABLE IF NOT EXISTS approved_sources" in sql_text
-    assert "CREATE TABLE IF NOT EXISTS audit_events" in sql_text
-    assert "PRJ-001" in sql_text
+    # If this script also created tables, the first migration would fail on a fresh database.
+    assert "CREATE TABLE" not in sql_text.upper()
+    assert (REPO_ROOT / "alembic.ini").exists()
+    assert (REPO_ROOT / "migrations" / "versions" / "0001_schema_v1.py").exists()
 
 
 def test_keycloak_dev_realm_config_is_valid_json() -> None:
