@@ -1,0 +1,22 @@
+# Files that must never be sent to Docker when building an image.
+
+# Secrets and local settings
+.env
+.env.*
+!.env.example
+
+# Version control, caches and local environments
+.git
+.venv
+venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+*.egg-info
+
+# Large or regenerated folders
+frontend/node_modules
+frontend/dist
+data/corpus
+evals/golden_questions_checked.csv

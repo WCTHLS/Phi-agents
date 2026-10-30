@@ -1,0 +1,23 @@
+# Development tools image: Python plus every project dependency, for running Alembic, the
+# seed and corpus scripts, and the tests inside Docker. The repository itself is mounted over
+# /workspace at run time (see docker-compose.dev.yml), so edits on your machine show up at once.
+#
+# The production API image is the separate Dockerfile in this folder.
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /workspace
+
+# Only the files pip needs, so rebuilding is fast unless dependencies change.
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+# ".[dev]" = the app and its test tools. pypdf is used by scripts/fetch_corpus.py and
+# evals/verify_questions.py. Secrets are never copied into the image (see .dockerignore).
+RUN python -m pip install -e ".[dev]" pypdf
+
+CMD ["bash"]
