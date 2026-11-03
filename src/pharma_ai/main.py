@@ -9,12 +9,14 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from pharma_ai.api.middleware import RequestLoggingMiddleware
 from pharma_ai.api.routes.audit import audit_router
 from pharma_ai.api.routes.auth import auth_router
 from pharma_ai.api.routes.health import router as health_router
 from pharma_ai.api.routes.projects import router as projects_router
 from pharma_ai.api.routes.research import router as research_router
 from pharma_ai.core.config import settings
+from pharma_ai.core.logging_config import configure_logging
 from pharma_ai.infrastructure.audit.service import (
     AuditActor,
     AuditLogService,
@@ -24,6 +26,9 @@ from pharma_ai.infrastructure.audit.service import (
 from pharma_ai.infrastructure.security.auth import get_token_verifier
 
 logger = logging.getLogger(__name__)
+
+# Structured, redacted logs (S1-05). Done first so startup problems below are logged safely too.
+configure_logging(settings.log_level, settings.log_format)
 
 # Fail fast on unsafe or incomplete auth settings (e.g. AUTH_MODE=dev in production).
 get_token_verifier()
@@ -45,7 +50,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
+# Added last, so it is the outermost layer and sees every request, including refused ones.
+app.add_middleware(RequestLoggingMiddleware)
 
 
 def _audit_service_for(request: Request) -> AuditLogService:

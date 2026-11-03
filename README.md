@@ -198,6 +198,14 @@ Exit code `0` means every check passed. Each run adds a few audit rows for a mad
 
 Start the UI (step 6) and open http://localhost:5173. Switch between Scientist, Reviewer and Admin in the top bar, ask a question on the Research tab, and open the Audit tab as Admin. Everything you see is the UI's own **built-in sample data and demo login**; it is not read from the API or the database yet. So a working UI proves the UI builds and renders, not that it is connected. To see real API behaviour use `scripts/smoke_test.py` or the API docs with a token from `scripts/dev_token.py`.
 
+## Logs
+
+The API writes one log line per request (method, path, status, time taken, the signed-in person's stable id, the project in the path) plus its own warnings and errors. Each request has a `request_id`, which is also returned in the `X-Request-ID` response header; send your own `X-Request-ID` (8 to 64 letters, digits, `.`, `_`, `-`) to follow a request across systems.
+
+What is **never** written: sign-in tokens, passwords, secrets, e-mail addresses, the query string, request or response bodies, and the text of questions, answers or documents. Fields with names such as `token`, `password`, `query`, `answer` or `text` are replaced with `[REDACTED]`, and anything that looks like a token, an e-mail address or a password in a web address is removed from messages and error traces. This is not the audit trail (that is the `audit_events` table, see ADR-005); logs are for fixing problems.
+
+If the optional `opentelemetry-api` package is installed (`pip install -e ".[observability]"`) and a trace is active, log lines also carry `trace_id` and `span_id`. Nothing needs it to run. The rules live in `src/pharma_ai/core/redaction.py`; what the client actually permits in logs is still to be confirmed (`docs/security/data-handling.md`), so the rules are strict by default.
+
 ## Settings (`.env`)
 
 `.env.example` lists every setting with a safe placeholder; your `.env` holds the real values and is never committed.
@@ -209,6 +217,7 @@ Start the UI (step 6) and open http://localhost:5173. Switch between Scientist, 
 | `TEST_DATABASE_URL` | The throwaway database the tests erase. Its name must contain `test`; the tests refuse anything else. |
 | `AUTH_MODE`, `AUTH_DEV_SECRET` | `dev` accepts tokens from `scripts/dev_token.py`; `oidc` uses Keycloak. Dev mode is refused unless `ENVIRONMENT` is `local` or `test`. |
 | `AUDIT_BACKEND` | `database` (default) or `memory` (no database; local/test only). |
+| `LOG_LEVEL`, `LOG_FORMAT` | How much the API logs (`INFO` by default) and how: `json` (default, one JSON object per line) or `text` (readable, for local work). See "Logs" below. |
 | `COMPOSE_FILE`, `COMPOSE_PATH_SEPARATOR` | Make `docker compose` also load the dev tools container. |
 | `LLM_PROVIDER`, `LLM_MODEL` | Not configured yet. Put model endpoints and keys only here, never in Git. |
 
@@ -293,7 +302,7 @@ pharma-ai-platform/
 ## Where to read next
 
 - [docs/architecture/erd.md](docs/architecture/erd.md): the database tables and the rules the database enforces.
-- [docs/architecture/decisions/](docs/architecture/decisions/): why things are built this way (stack, licence rule, extraction and embedding choice, schema, audit trail).
+- [docs/architecture/decisions/](docs/architecture/decisions/): why things are built this way (stack, licence rule, extraction and embedding choice, schema, audit trail, logging).
 - [data/sources/CORPUS.md](data/sources/CORPUS.md): the approved documents, their licence status, and the golden questions.
 - [docs/implementation/phase-plan.md](docs/implementation/phase-plan.md) and [docs/implementation/team-ownership.md](docs/implementation/team-ownership.md): plan and ways of working.
 - [docs/security/data-handling.md](docs/security/data-handling.md): what to confirm before using real client material.

@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     app_name: str = "Pharma AI Development Assistant"
     environment: str = "local"
     log_level: str = "INFO"
+    # "json" (one JSON object per line, for servers and log tools) or "text" (readable, for local
+    # work). Both redact secrets and personal data; see core/redaction.py.
+    log_format: Literal["json", "text"] = "json"
     database_url: str = "postgresql://pharma_ai:change_me_local_only@localhost:5432/pharma_ai"
     tika_url: str = "http://localhost:9998"
 
