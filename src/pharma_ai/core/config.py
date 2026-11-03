@@ -15,6 +15,15 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://pharma_ai:change_me_local_only@localhost:5432/pharma_ai"
     tika_url: str = "http://localhost:9998"
 
+    # Document ingestion (S2-03, ADR-007). Originals and extracted text are kept in this folder.
+    # Relative paths are relative to where the API is started (the repository root).
+    storage_root: str = "data/storage"
+    # Largest file the upload endpoint accepts, in megabytes.
+    max_upload_mb: int = 50
+    # "pypdf" reads the PDF's own text layer in-process. "tika" asks the Tika server and falls
+    # back to pypdf if Tika cannot be reached.
+    extraction_engine: Literal["pypdf", "tika"] = "pypdf"
+
     # Where the audit trail is stored (S1-11). "memory" is for tests and database-less local runs
     # and is refused unless ENVIRONMENT is local or test.
     audit_backend: Literal["database", "memory"] = "database"

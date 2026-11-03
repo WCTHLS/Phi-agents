@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import exists, select
+from sqlalchemy import and_, exists, func, select
 from sqlalchemy.orm import Session
 
 from pharma_ai.infrastructure.db.models import (
@@ -87,6 +87,10 @@ class DocumentRepository:
         version_label: str | None = None,
         page_count: int | None = None,
         text_layer: str | None = None,
+        extraction_method: str | None = None,
+        extraction_status: str | None = None,
+        extraction_notes: Iterable[str] = (),
+        extracted_key: str | None = None,
     ) -> DocumentVersion:
         version = DocumentVersion(
             document_id=document_id,
@@ -98,6 +102,10 @@ class DocumentRepository:
             page_count=page_count,
             text_layer=text_layer,
             retrieved_at=retrieved_at,
+            extraction_method=extraction_method,
+            extraction_status=extraction_status,
+            extraction_notes=list(extraction_notes),
+            extracted_key=extracted_key,
         )
         self._session.add(version)
         self._session.flush()
@@ -120,6 +128,43 @@ class DocumentRepository:
             .order_by(Document.source_id)
         )
         return list(self._session.scalars(stmt))
+
+    def latest_versions_for_project(
+        self, project_id: str, allowed_project_ids: Iterable[str]
+    ) -> list[tuple[Document, Source, DocumentVersion]]:
+        """Each document linked to the project with its source and newest version.
+
+        Returns nothing unless the caller may access the project.
+        """
+        if project_id not in set(allowed_project_ids):
+            return []
+        # The highest version number of every document, to keep only the newest version below.
+        newest = (
+            select(
+                DocumentVersion.document_id.label("document_id"),
+                func.max(DocumentVersion.version_number).label("version_number"),
+            )
+            .group_by(DocumentVersion.document_id)
+            .subquery()
+        )
+        stmt = (
+            select(Document, Source, DocumentVersion)
+            .join(ProjectDocument, ProjectDocument.document_id == Document.document_id)
+            .join(Source, Source.source_id == Document.source_id)
+            .join(DocumentVersion, DocumentVersion.document_id == Document.document_id)
+            .join(
+                newest,
+                and_(
+                    newest.c.document_id == DocumentVersion.document_id,
+                    newest.c.version_number == DocumentVersion.version_number,
+                ),
+            )
+            .where(ProjectDocument.project_id == project_id)
+            .order_by(Document.source_id)
+        )
+        return [
+            (document, source, version) for document, source, version in self._session.execute(stmt)
+        ]
 
 
 @dataclass(frozen=True)

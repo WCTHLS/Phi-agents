@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from functools import lru_cache
+
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -36,3 +39,18 @@ def make_engine(url: str | None = None) -> Engine:
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+@lru_cache
+def _application_session_factory() -> sessionmaker[Session]:
+    return make_session_factory(make_engine())
+
+
+def get_db_session() -> Iterator[Session]:
+    """One database session per request (a FastAPI dependency).
+
+    Nothing is saved unless the route calls ``commit()``; anything left uncommitted is rolled back
+    when the request ends. Tests replace this dependency with a rolled-back test session.
+    """
+    with _application_session_factory()() as session:
+        yield session

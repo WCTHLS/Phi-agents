@@ -215,11 +215,22 @@ class DocumentVersion(Base):
         String(16)
     )  # can text be selected? yes/partial/no
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # How the text was read and how far to trust it (S2-03, migration 0003).
+    extraction_method: Mapped[str | None] = mapped_column(String(16))  # pypdf or tika
+    extraction_status: Mapped[str | None] = mapped_column(String(16))  # ok, partial or failed
+    extraction_notes: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    extracted_key: Mapped[str | None] = mapped_column(Text)  # object-store key of the page text
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_NOW)
 
     __table_args__ = (
         UniqueConstraint(
             "document_id", "version_number", name="uq_document_versions_document_id_version_number"
+        ),
+        CheckConstraint(
+            "extraction_status IS NULL OR extraction_status IN ('ok', 'partial', 'failed')",
+            name="extraction_status_values",
         ),
         UniqueConstraint("document_id", "sha256", name="uq_document_versions_document_id_sha256"),
         CheckConstraint("version_number >= 1", name="version_number_positive"),
