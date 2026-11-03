@@ -55,6 +55,30 @@ def test_nginx_and_makefile_exist() -> None:
     assert (REPO_ROOT / ".env.example").exists()
 
 
+def test_api_image_contains_the_migrations() -> None:
+    """The API image must carry alembic.ini and migrations/, or it cannot create its own tables."""
+    dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "COPY alembic.ini" in dockerfile
+    assert "COPY migrations" in dockerfile
+    assert (REPO_ROOT / "alembic.ini").exists() and (REPO_ROOT / "migrations").is_dir()
+
+
+def test_compose_passes_auth_and_audit_settings_with_safe_defaults() -> None:
+    """The api service takes sign-in and audit settings from .env, defaulting to the safe values."""
+    config = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    env = config["services"]["api"]["environment"]
+    assert env["AUTH_MODE"] == "${AUTH_MODE:-oidc}"
+    assert env["AUDIT_BACKEND"] == "${AUDIT_BACKEND:-database}"
+    assert "AUTH_DEV_SECRET" in env
+
+
+def test_vite_proxy_defaults_to_the_documented_api_port() -> None:
+    """npm run dev must reach the API on port 8000 (README, dev container, smoke test)."""
+    text = (REPO_ROOT / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
+    assert "http://127.0.0.1:8000" in text
+    assert "8001" not in text
+
+
 def test_ui_container_and_frontend_dockerfile_exist() -> None:
     """Verify frontend Dockerfile, nginx.conf, and docker-compose ui service (S2-04)."""
     dockerfile_path = REPO_ROOT / "frontend" / "Dockerfile"

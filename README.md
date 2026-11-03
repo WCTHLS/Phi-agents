@@ -147,14 +147,17 @@ No database at all? Put `AUDIT_BACKEND=memory` in `.env`. The API then keeps its
 
 ### Option C: the full platform in containers
 
-This starts the API, PostgreSQL, Keycloak (sign-in server), Apache Tika (document text extraction) and the Nginx gateway. It is heavy (several large images) and was **not re-tested** when this guide was written; the UI is not part of it (run it as in step 6).
+This starts the API, the UI, PostgreSQL, Keycloak (sign-in server), Apache Tika (document text extraction) and the Nginx gateway. It is heavy (several large images) and the whole stack has **not been run end to end**; the API and UI images were built and checked on their own.
 
 ```bash
 make up                           # macOS / Linux / WSL
 docker compose up -d --build      # Windows PowerShell (after creating .env)
+docker compose exec api alembic upgrade head    # create the tables (the image includes the migrations)
 ```
 
-Then create the tables as in step 3. To stop: `make down` or `docker compose down`.
+Open the UI through the gateway at http://localhost:8088, not on port 5173: the UI container does not forward `/api` calls itself. The UI has no Keycloak sign-in yet, so for local work keep `AUTH_MODE=dev` in `.env` (what `scripts/make_env.py` writes); with the default `AUTH_MODE=oidc` the UI cannot obtain a token. To stop: `make down` or `docker compose down`.
+
+When you run the UI with `npm run dev` it forwards `/api` to http://127.0.0.1:8000. Set `VITE_API_URL` to point it at an API on another port.
 
 | Service | Local URL | Purpose |
 | :--- | :--- | :--- |

@@ -7,6 +7,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY pyproject.toml README.md ./
 COPY src ./src
+# Database migrations, so `docker compose exec api alembic upgrade head` can create the tables.
+COPY alembic.ini ./
+COPY migrations ./migrations
 
 RUN python -m pip install --no-cache-dir --upgrade pip && \
     python -m pip install --no-cache-dir -e .

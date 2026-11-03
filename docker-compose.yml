@@ -63,6 +63,11 @@ services:
       TIKA_URL: http://tika:9998
       OIDC_ISSUER_URL: http://keycloak:8080/realms/pharma
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-pharma-ui}
+      # Sign-in and audit settings come from .env. The defaults are the safe ones: Keycloak sign-in
+      # and the database audit trail. scripts/make_env.py sets AUTH_MODE=dev for local work.
+      AUTH_MODE: ${AUTH_MODE:-oidc}
+      AUTH_DEV_SECRET: ${AUTH_DEV_SECRET:-}
+      AUDIT_BACKEND: ${AUDIT_BACKEND:-database}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
