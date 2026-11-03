@@ -45,3 +45,42 @@ node_modules/
 frontend/dist/
 reports/
 *.tsbuildinfo
+
+# Excel lock files (created while a workbook is open)
+~$*
+
+# Keys and certificates
+*.pem
+*.key
+
+# Local databases and model weights
+*.db
+*.sqlite3
+*.bin
+*.gguf
+
+# Logs, coverage and tool caches
+*.log
+npm-debug.log*
+.coverage
+htmlcov/
+coverage/
+.mypy_cache/
+.vite/
+
+# Local service data and overrides
+.podman/
+/pgdata/
+/storage/
+/seaweedfs-data/
+/sources/raw/
+compose.override.yaml
+docker-compose.override.yml
+
+# Editor and OS files
+*.swp
+*.swo
+desktop.ini
+
+# Claude Code local settings
+.claude/settings.local.json
