@@ -166,6 +166,23 @@ class DocumentRepository:
             (document, source, version) for document, source, version in self._session.execute(stmt)
         ]
 
+    def versions_for_documents(
+        self, document_ids: Iterable[uuid.UUID]
+    ) -> dict[uuid.UUID, list[DocumentVersion]]:
+        """All versions for each given document_id, ordered newest first."""
+        ids = list(document_ids)
+        if not ids:
+            return {}
+        stmt = (
+            select(DocumentVersion)
+            .where(DocumentVersion.document_id.in_(ids))
+            .order_by(DocumentVersion.document_id, DocumentVersion.version_number.desc())
+        )
+        grouped: dict[uuid.UUID, list[DocumentVersion]] = {doc_id: [] for doc_id in ids}
+        for ver in self._session.scalars(stmt):
+            grouped.setdefault(ver.document_id, []).append(ver)
+        return grouped
+
 
 @dataclass(frozen=True)
 class ChunkInput:

@@ -176,6 +176,8 @@ def test_a_changed_file_is_a_new_version_and_the_listing_shows_the_newest(api: T
     ).json()
     assert entry["latest_version"]["version_number"] == 2
     assert entry["latest_version"]["page_count"] == 3
+    assert [v["version_number"] for v in entry["versions"]] == [2, 1]
+    assert entry["preview_text"] and "Cadmium" in entry["preview_text"]
 
 
 # --- who may do what ----------------------------------------------------------------------------

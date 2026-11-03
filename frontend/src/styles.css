@@ -372,3 +372,124 @@ body {
   padding: 1.25rem;
   border-radius: 8px;
 }
+
+.upload-panel {
+  border: 1px solid var(--border-color);
+  background: #f8fafc;
+  border-radius: 6px;
+  padding: 0.9rem;
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.upload-panel h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.upload-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.upload-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.upload-grid select,
+.upload-grid input {
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.upload-status {
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.upload-status.success {
+  background: var(--verified-bg);
+  color: var(--verified-text);
+  border: 1px solid #86efac;
+}
+
+.upload-status.error {
+  background: var(--unverified-bg);
+  color: var(--unverified-text);
+  border: 1px solid #fca5a5;
+}
+
+.doc-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.4rem 0;
+}
+
+.badge-warning {
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+}
+
+.attribution-note {
+  font-size: 0.78rem;
+  color: #475569;
+  background: #f1f5f9;
+  border-left: 3px solid #64748b;
+  padding: 0.35rem 0.6rem;
+  margin: 0.45rem 0;
+}
+
+.doc-preview-box {
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  padding: 0.65rem;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  margin-top: 0.45rem;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.version-history-box {
+  margin-top: 0.5rem;
+  border-top: 1px dashed var(--border-color);
+  padding-top: 0.45rem;
+  font-size: 0.78rem;
+}
+
+.version-history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.35rem 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.version-history-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0.3rem 0.55rem;
+}

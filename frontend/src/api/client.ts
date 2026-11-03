@@ -146,5 +146,99 @@ export async function fetchAuditEvents(
   if (!response.ok) {
     throw new Error(`Failed to load audit events (${response.status})`);
   }
-  return (await response.json()) as AuditEventsResponse;
+  const result = (await response.json()) as AuditEventsResponse;
+  return result;
+}
+
+export interface DocumentVersionInfo {
+  version_id: string;
+  version_number: number;
+  version_label?: string | null;
+  sha256: string;
+  byte_size: number;
+  page_count?: number | null;
+  text_layer?: string | null;
+  extraction_method?: string | null;
+  extraction_status?: string | null;
+  extraction_notes: string[];
+  retrieved_at?: string | null;
+}
+
+export interface IngestedDocumentResponse extends DocumentVersionInfo {
+  document_id: string;
+  source_id: string;
+  already_ingested: boolean;
+  project_ids: string[];
+}
+
+export interface ProjectDocument {
+  document_id: string;
+  source_id: string;
+  title: string;
+  authority: string;
+  attribution?: string | null;
+  latest_version: DocumentVersionInfo;
+  versions?: DocumentVersionInfo[];
+  preview_text?: string | null;
+}
+
+export async function fetchProjectDocuments(
+  projectId: string,
+  accessToken?: string
+): Promise<ProjectDocument[]> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+  const response = await fetch(
+    `${API_BASE}/api/v1/projects/${encodeURIComponent(projectId)}/documents`,
+    { headers }
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to load project documents (${response.status})`);
+  }
+  return (await response.json()) as ProjectDocument[];
+}
+
+export async function uploadSourceDocument(params: {
+  sourceId: string;
+  projectId: string;
+  fileBytes: ArrayBuffer | Uint8Array;
+  versionLabel?: string;
+  accessToken?: string;
+}): Promise<IngestedDocumentResponse> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/pdf",
+    Accept: "application/json",
+  };
+  if (params.accessToken) {
+    headers.Authorization = `Bearer ${params.accessToken}`;
+  }
+  const query = new URLSearchParams();
+  if (params.projectId) {
+    query.append("project_id", params.projectId);
+  }
+  if (params.versionLabel && params.versionLabel.trim()) {
+    query.append("version_label", params.versionLabel.trim());
+  }
+  const qs = query.toString() ? `?${query.toString()}` : "";
+  const response = await fetch(
+    `${API_BASE}/api/v1/sources/${encodeURIComponent(params.sourceId)}/versions${qs}`,
+    {
+      method: "PUT",
+      headers,
+      body: params.fileBytes as BodyInit,
+    }
+  );
+  if (!response.ok) {
+    let detail = `Upload failed (${response.status})`;
+    try {
+      const errJson = (await response.json()) as { detail?: string };
+      if (errJson?.detail) detail = `${response.status}: ${errJson.detail}`;
+    } catch {
+      // keep default status text
+    }
+    throw new Error(detail);
+  }
+  return (await response.json()) as IngestedDocumentResponse;
 }
