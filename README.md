@@ -2,7 +2,7 @@
 
 An open-source-first foundation for a pharma-domain AI assistant supporting trusted scientific/regulatory research, formulation guidance, Design of Experiments (DOE), development-risk review, and controlled documentation.
 
-> **Current status:** Phase 0 foundation and the start of Phase 1. The API (sign-in checks, project access, audit trail), the PostgreSQL + pgvector database (schema, migrations, source register) and a UI shell are in place. RAG, OCR/document ingestion, formulation guidance, DOE workflows, and regulatory document generation are **not implemented yet**.
+> **Current status:** Phase 0 foundation and the start of Phase 1. The API (sign-in checks, project access, audit trail), the PostgreSQL + pgvector database (schema, migrations, source register) and a UI shell are in place. Chunking and embeddings, RAG answers, OCR for scanned pages, formulation guidance, DOE workflows, and regulatory document generation are **not implemented yet**.
 
 ## What works today
 
@@ -12,7 +12,8 @@ An open-source-first foundation for a pharma-domain AI assistant supporting trus
 | **Database** (PostgreSQL + pgvector) | Schema v1 with migrations, a seed script that loads the approved-source register, and an append-only audit table. |
 | **Audit trail** | The server records who did what: project access, source listing, research queries (as a fingerprint, not the question text), reading the log, and refused requests. |
 | **UI** (React + Vite) | A workspace shell. Its role switcher is a **demo login** and its data is built in, so it does not call the API with a real token yet (see "Try the API"). |
-| **Not yet** | Real document ingestion, embeddings and search over PDFs, the answer workflow with a review gate, and a real sign-in screen in the UI. |
+| **Document ingestion** | An administrator (or the `scripts/ingest_corpus.py` script) can ingest an approved PDF: the original is kept unchanged, fingerprinted (SHA-256) and read page by page, and a project's members can list its documents. Held documents are refused. Scanned pages are recorded as having no text (no OCR yet). |
+| **Not yet** | Chunking, embeddings and search over the ingested text, the answer workflow with a review gate, and a real sign-in screen in the UI. The research answers still come from a small built-in set of sample passages, not from the ingested documents. |
 
 ## Start here
 
@@ -51,6 +52,14 @@ docker compose run --rm dev python scripts/seed_dev_data.py
 ```
 
 You should see `Seeded: 4 roles, 2 projects, 22 sources`.
+
+**3b. Ingest the corpus** (optional; needs the PDFs from `python scripts/fetch_corpus.py` and the manual downloads listed in `data/sources/CORPUS.md`):
+
+```bash
+docker compose run --rm dev python scripts/ingest_corpus.py --project PRJ-001 --project PRJ-002
+```
+
+It prints one line per document: `v1 added` with page count and whether the pages have text, `already` if that exact file was ingested before, `held` for documents that are not eligible (never ingested), and `missing` if the PDF is not on disk. Originals and extracted text go to `data/storage` (git-ignored). Run it again and nothing changes. Add `--dry-run` to preview.
 
 **4. Run the tests.** The database tests need their own empty database (they erase it), so create it once:
 
@@ -217,6 +226,7 @@ If the optional `opentelemetry-api` package is installed (`pip install -e ".[obs
 | `TEST_DATABASE_URL` | The throwaway database the tests erase. Its name must contain `test`; the tests refuse anything else. |
 | `AUTH_MODE`, `AUTH_DEV_SECRET` | `dev` accepts tokens from `scripts/dev_token.py`; `oidc` uses Keycloak. Dev mode is refused unless `ENVIRONMENT` is `local` or `test`. |
 | `AUDIT_BACKEND` | `database` (default) or `memory` (no database; local/test only). |
+| `STORAGE_ROOT`, `MAX_UPLOAD_MB`, `EXTRACTION_ENGINE` | Where ingested originals and extracted text are kept (a folder; a volume in compose), the largest upload accepted, and the PDF reader: `pypdf` (in-process, default) or `tika` (uses `TIKA_URL`, falls back to pypdf). See ADR-007. |
 | `LOG_LEVEL`, `LOG_FORMAT` | How much the API logs (`INFO` by default) and how: `json` (default, one JSON object per line) or `text` (readable, for local work). See "Logs" below. |
 | `COMPOSE_FILE`, `COMPOSE_PATH_SEPARATOR` | Make `docker compose` also load the dev tools container. |
 | `LLM_PROVIDER`, `LLM_MODEL` | Not configured yet. Put model endpoints and keys only here, never in Git. |
@@ -272,6 +282,7 @@ pharma-ai-platform/
 │   ├── dev_token.py                       # Make a signed token for local API testing
 │   ├── smoke_test.py                      # End-to-end check of the running API and database
 │   ├── seed_dev_data.py                   # Load roles, sample projects and the source register
+│   ├── ingest_corpus.py                   # Ingest the corpus PDFs: store, fingerprint, extract text
 │   ├── create_test_database.py            # Create the throwaway database for tests
 │   ├── fetch_corpus.py                    # Download the approved corpus PDFs (not committed)
 │   └── init-db.sql                        # Enables the pgvector extension (tables come from migrations)
@@ -280,7 +291,7 @@ pharma-ai-platform/
 │       ├── api/                           # FastAPI routers & request validation
 │       ├── core/                          # App configuration & settings
 │       ├── features/                      # Domain capabilities
-│       │   ├── documents/                 # Document ingestion & parsing orchestration
+│       │   ├── documents/                 # Document ingestion service & PDF text extraction
 │       │   ├── doe/                       # Design of Experiments statistical modeling
 │       │   ├── formulation/               # Formulation & excipient compatibility guidance
 │       │   ├── quality_risk/              # Bioavailability, stability & impurity evaluation
@@ -293,7 +304,7 @@ pharma-ai-platform/
 │       │   │   └── fda_ema/               # FDA, EMA/MHRA & ICH regulatory connector
 │       │   ├── db/                        # Database models, sessions, scoped repositories, seed loader
 │       │   ├── security/                  # Sign-in token checks and project/role permissions
-│       │   └── storage/                   # SeaweedFS object storage client (planned)
+│       │   └── storage/                   # Object store interface + local-folder store (originals)
 │       ├── workers/                       # Celery + RabbitMQ asynchronous task workers (planned)
 │       └── evals/                         # Benchmark test suite, faithfulness evals & telemetry (planned)
 └── tests/                                 # Automated pytest suite
@@ -302,7 +313,7 @@ pharma-ai-platform/
 ## Where to read next
 
 - [docs/architecture/erd.md](docs/architecture/erd.md): the database tables and the rules the database enforces.
-- [docs/architecture/decisions/](docs/architecture/decisions/): why things are built this way (stack, licence rule, extraction and embedding choice, schema, audit trail, logging).
+- [docs/architecture/decisions/](docs/architecture/decisions/): why things are built this way (stack, licence rule, extraction and embedding choice, schema, audit trail, logging, ingestion and storage).
 - [data/sources/CORPUS.md](data/sources/CORPUS.md): the approved documents, their licence status, and the golden questions.
 - [docs/implementation/phase-plan.md](docs/implementation/phase-plan.md) and [docs/implementation/team-ownership.md](docs/implementation/team-ownership.md): plan and ways of working.
 - [docs/security/data-handling.md](docs/security/data-handling.md): what to confirm before using real client material.

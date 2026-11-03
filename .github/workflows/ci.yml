@@ -60,7 +60,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       tika:
-        image: apache/tika:latest
+        image: apache/tika:4.2.0
         ports:
           - 9998:9998
     env:

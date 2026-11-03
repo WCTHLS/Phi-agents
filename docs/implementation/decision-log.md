@@ -15,7 +15,7 @@ Last updated: 2 Nov 2026. This is the one place to see what the project has deci
 | ID | Decision | Status | Recorded in | Caveat |
 |---|---|---|---|---|
 | D1 | Only documents marked `eligible = yes` in the source manifest may be ingested. Held documents stay out until someone with authority approves them. | Decided for the Sprint 2 test corpus (team decision) | [ADR-002](../architecture/decisions/ADR-002-corpus-licence-rule.md), `data/sources/corpus_manifest.csv` | Not ratified by the client, counsel or the publishers. Nobody on the team is qualified to judge licences, so the rule is deliberately conservative. |
-| D2 | Extract text with Apache Tika (pypdf as fallback). Embeddings: `BAAI/bge-small-en-v1.5` for production, `all-MiniLM-L6-v2` for CI and development. | Decided for S2-03 and S2-06 | [ADR-003](../architecture/decisions/ADR-003-extraction-and-embedding-selection.md) | The licences are as stated in the ADR; nobody has independently checked them. Two mismatches to fix: compose runs `apache/tika:latest` while the ADR names `tika/tika:2.9.2-full`, and `models_config.py` still defaults to the MiniLM model. The ADR also speaks of a "GxP enclave", which nothing in the project provides. |
+| D2 | Extract text with Apache Tika (pypdf as fallback). Embeddings: `BAAI/bge-small-en-v1.5` for production, `all-MiniLM-L6-v2` for CI and development. | Decided for S2-03 and S2-06 | [ADR-003](../architecture/decisions/ADR-003-extraction-and-embedding-selection.md) | The licences are as stated in the ADR; nobody has independently checked them. Two mismatches: the ADR names `tika/tika:2.9.2-full`, but compose and CI now pin `apache/tika:4.2.0`, the version the page reader was tested against (ADR-007 supersedes the version); and `models_config.py` still defaults to the MiniLM model. The ADR also speaks of a "GxP enclave", which nothing in the project provides. |
 | D3 | Development uses public, open-source documents only. No regulated or client data. | Manager's instruction (from the project handoff) | Not written anywhere else in the repo | Needs a one-line entry in `docs/security/data-handling.md`. |
 | D4 | The interface is a web workspace, not mobile. | Default taken from the PRD (FR-01) | Handoff brief | Confirm; no one has said mobile is wanted. |
 | D5 | Database schema v1: ten tables, with the licence rule enforced inside the database. | Proposed | [ADR-004](../architecture/decisions/ADR-004-database-schema-v1.md) | Needs review by the platform owner. |
@@ -23,6 +23,7 @@ Last updated: 2 Nov 2026. This is the one place to see what the project has deci
 | D7 | Logs are structured and redacted; they never carry tokens, passwords, e-mail addresses, or question, answer or document text. | Proposed | [ADR-006](../architecture/decisions/ADR-006-structured-logging.md) | Strict default. The client has not said what may appear in logs (open question Q11). |
 | D8 | Technology stack (FastAPI, PostgreSQL with pgvector, React with Vite, Keycloak, Tika, and so on). | Proposed for the MVP | [ADR-001](../architecture/decisions/ADR-001-initial-stack.md) | The ADR says "confirm with manager/team during Phase 0". No confirmation is recorded. |
 | D9 | Demo output is labelled "not yet reviewed by a domain expert" until a scientist has reviewed the evidence. | Decided in the handoff | Handoff brief | Not done: the UI still shows an answer marked "verified" when a request fails. |
+| D10 | Original documents are kept in a local folder behind an `ObjectStore` interface; ingestion stores the file, its SHA-256 fingerprint and page-by-page text; only administrators upload; scans are kept but marked as having no text. | Proposed (built 2 Nov) | [ADR-007](../architecture/decisions/ADR-007-document-ingestion-and-storage.md) | Needs review by the platform owner. A local folder suits one machine only. |
 
 ## B. Open questions
 
@@ -35,7 +36,7 @@ Last updated: 2 Nov 2026. This is the one place to see what the project has deci
 | Q5 | Who is the scientist for the demo and the question review? | Manager | Sprint 2 demo, Fri 6 Nov | **Open** | The 16 draft golden questions are machine-checked (11 of 16 pass), not scientist-approved. Until a scientist reviews them, demo output carries the "not yet reviewed" label (D9). |
 | Q6 | Azure or on-premises? May content go to a cloud model? | Manager, with the client | Before any client document is used | **Open** | Not needed while only public documents are used (D3). The design keeps extraction and the model behind adapters so either answer works. [`docs/security/data-handling.md`](../security/data-handling.md) lists this as a question to ask. |
 | Q7 | Which product is the pilot? | Manager, with the scientist | Before product-specific sources are chosen | **Open** | Product-specific guidance and labels cannot be picked without it. The corpus has none today. |
-| Q8 | Where are original files stored: local folder or an S3-style store such as SeaweedFS? | Backend developer, with the platform developer | 2 Nov, before S2-03 starts | **Open** | `infrastructure/storage` is a placeholder (a README describing a SeaweedFS wrapper, no code). Recommended for Sprint 2: a local folder behind a small interface, so the store can change later. |
+| Q8 | Where are original files stored: local folder or an S3-style store such as SeaweedFS? | Backend developer, with the platform developer | 2 Nov, before S2-03 starts | **Decided 2 Nov** (by the backend developer): a local folder behind a small interface | Recorded in [ADR-007](../architecture/decisions/ADR-007-document-ingestion-and-storage.md) and built. Another store only has to implement three methods. The platform developer has not reviewed it yet. |
 | Q9 | What are the Indian Pharmacopoeia licence terms? | Manager and the client's legal contact | Not stated | **Open** | Treated as licensed, so it stays out of the corpus. |
 | Q10 | Which bioavailability / bioequivalence guidance does CDSCO apply now? | Domain expert | Not stated | **Open** | The 2005 CDSCO guideline is on hold: CDSCO's policy bars copying without permission, and no official copy was found online. |
 | Q11 | What must be logged for traceability, and what must never appear in logs? | Manager and the client's security contact | Before real documents are ingested | **Open** | Logs are strict by default (D7). Item taken from `docs/security/data-handling.md`. |
@@ -49,7 +50,7 @@ Last updated: 2 Nov 2026. This is the one place to see what the project has deci
 | Blocked work | Waiting for |
 |---|---|
 | Real sign-in in the UI (S1-09) | Q1 |
-| Starting ingestion (S2-03) | Q8; the document approval in Q2 |
+| Ingesting the approved set for real (S2-03 is built) | The document approval in Q2 |
 | Language-model step (S2-09) | Q3, Q4 |
 | A credible demo | Q5 |
 | Using any client document, or a cloud model | Q6, Q11 |

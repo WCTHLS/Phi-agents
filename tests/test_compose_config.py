@@ -111,7 +111,10 @@ def test_ci_workflow_includes_tika_service_and_container_images_job() -> None:
     # 1. Tika service container in integration tests
     test_services = jobs.get("test", {}).get("services", {})
     assert "tika" in test_services
-    assert test_services["tika"]["image"] == "apache/tika:latest"
+    # Pinned, not "latest": the page-aware parser was tested against this version (S2-03).
+    assert test_services["tika"]["image"] == "apache/tika:4.2.0"
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    assert compose["services"]["tika"]["image"] == test_services["tika"]["image"]
 
     # 2. Container image build job
     assert "container-images" in jobs

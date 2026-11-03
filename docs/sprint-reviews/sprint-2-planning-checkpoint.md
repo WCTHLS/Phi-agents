@@ -90,7 +90,7 @@ The manifest, not that document, is the source of truth for what may be ingested
 | Embeddings, production | `BAAI/bge-small-en-v1.5` (384 dimensions) | MIT | ADR-003 | Decided; licence not independently checked |
 | Embeddings, CI and dev | `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions) | Apache 2.0 | ADR-003 | Decided. `models_config.py` still defaults to this model: align it. |
 | Reranker | `BAAI/bge-reranker-base` | Not recorded | `models_config.py` | Deferred in the proposal |
-| Text extraction | Apache Tika, pypdf fallback | Apache 2.0 (Tika), BSD (pypdf), as stated in ADR-003 | ADR-003 | Decided. Compose runs `apache/tika:latest`, not the pinned version the ADR names: pin it. |
+| Text extraction | Apache Tika, pypdf fallback | Apache 2.0 (Tika), BSD (pypdf), as stated in ADR-003 | ADR-003 | Decided. Compose and CI now pin `apache/tika:4.2.0` (the version the reader was tested against), not the `2.9.2-full` the ADR names. |
 
 Both embedding models give 384-dimension vectors, so the database column does not change if the model does. **How is the language model run during development?** The developer laptop (Windows, 16 GB RAM, no GPU) cannot run the planned server. Options: WSL2, a shared development server, or a hosted model used on public documents only. What is allowed depends on Q6 (cloud or on-premises).
 
@@ -103,7 +103,7 @@ Both embedding models give 384-dimension vectors, so the database column does no
 | 3 | Keep the 7 held documents out (section 4)? | Yes. Ask ICH or client counsel about the four ICH guidelines; check EMA's legal notice ourselves. |
 | 4 | Who saves the 2 Indian PDFs, and by when? | Name an owner today. |
 | 5 | Which language model, and how is it run in development? | Choose a candidate and record its licence from the model card before S2-09. |
-| 6 | Where are original files stored (Q8)? | A local folder behind a small interface for Sprint 2. |
+| 6 | Where are original files stored (Q8)? | **Decided by the backend developer on 2 Nov:** a local folder behind a small interface ([ADR-007](../architecture/decisions/ADR-007-document-ingestion-and-storage.md)). Confirm, or name an object store. |
 | 7 | Agree the answer contract (section 1). | Keep the current response shape; do not show `verified` and `confidence_score` as fact. |
 | 8 | Which sign-in service (Q1)? | Decide, or confirm that development tokens are enough until after the Sprint 2 demo. |
 | 9 | Who is the demo scientist (Q5)? | Name one, even for a short review of the 16 golden questions. |

@@ -19,7 +19,7 @@ services:
       retries: 5
 
   tika:
-    image: apache/tika:latest
+    image: apache/tika:4.2.0
     container_name: pharma-ai-tika
     ports:
       - "${TIKA_PORT:-9998}:9998"
@@ -69,8 +69,15 @@ services:
       AUTH_MODE: ${AUTH_MODE:-oidc}
       AUTH_DEV_SECRET: ${AUTH_DEV_SECRET:-}
       AUDIT_BACKEND: ${AUDIT_BACKEND:-database}
+      # Document ingestion (S2-03): where originals and extracted text are kept, the upload limit,
+      # and which engine reads the PDFs ("pypdf" in-process, or "tika" with pypdf as fallback).
+      STORAGE_ROOT: /var/lib/pharma-ai/files
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
+      EXTRACTION_ENGINE: ${EXTRACTION_ENGINE:-pypdf}
     ports:
       - "${API_PORT:-8000}:8000"
+    volumes:
+      - pharma_ai_files:/var/lib/pharma-ai/files
     depends_on:
       db:
         condition: service_healthy
@@ -115,3 +122,4 @@ services:
 
 volumes:
   pharma_ai_pgdata:
+  pharma_ai_files:
