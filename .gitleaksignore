@@ -3,9 +3,10 @@
 # saying why it is safe. Never add a real secret here: rotate it instead.
 # Do not quote the flagged value in a comment: the comment itself then gets flagged.
 
-# tests/test_logging.py line 203: a made-up value that the test feeds to the log formatter to prove
-# that secrets in text are redacted before they are written.
+# tests/test_logging.py lines 203 and 206: made-up values that the test feeds to the log formatter
+# to prove that secrets in text are redacted before they are written.
 6f07014fddf866b629192342be0944e9c73452e1:tests/test_logging.py:generic-api-key:203
+6f07014fddf866b629192342be0944e9c73452e1:tests/test_logging.py:hashicorp-tf-password:206
 
 # This file, line 5 of the commit that first added it: the comment there quoted the made-up value
 # above. The comment has been reworded; this entry covers that earlier commit.

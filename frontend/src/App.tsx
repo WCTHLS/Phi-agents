@@ -6,6 +6,9 @@ import {
   fetchAuditEvents,
   ResearchResponse,
   submitResearchQuery,
+  fetchProjectDocuments,
+  ProjectDocument,
+  uploadSourceDocument,
 } from "./api/client";
 import { createDevSession, OidcSession, requestDevToken, UserRole } from "./auth/oidc";
 
@@ -98,12 +101,174 @@ const INITIAL_AUDIT_LOGS: AuditRecord[] = [
   },
 ];
 
+function buildSamplePdfBytes(pages: string[]): Uint8Array {
+  const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  const pageIds = pages.map((_, i) => 4 + 2 * i);
+  const objects: Record<number, string> = {
+    1: "<< /Type /Catalog /Pages 2 0 R >>",
+    2: `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pages.length} >>`,
+    3: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  };
+  pages.forEach((text, i) => {
+    const pageId = pageIds[i];
+    const contentId = pageId + 1;
+    const lines = text.split("\n");
+    const stream = `BT /F1 11 Tf 72 720 Td 14 TL\n${lines.map((l) => `(${esc(l)}) Tj T*`).join("\n")}\nET`;
+    objects[pageId] =
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] ` +
+      `/Resources << /Font << /F1 3 0 R >> >> /Contents ${contentId} 0 R >>`;
+    objects[contentId] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+  });
+  let out = "%PDF-1.4\n";
+  const offsets: Record<number, number> = {};
+  const maxObj = Math.max(...Object.keys(objects).map(Number));
+  for (let n = 1; n <= maxObj; n++) {
+    offsets[n] = out.length;
+    out += `${n} 0 obj\n${objects[n]}\nendobj\n`;
+  }
+  const xrefAt = out.length;
+  const size = maxObj + 1;
+  out += `xref\n0 ${size}\n0000000000 65535 f \n`;
+  for (let n = 1; n < size; n++) {
+    out += `${String(offsets[n]).padStart(10, "0")} 00000 n \n`;
+  }
+  out += `trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`;
+  return new TextEncoder().encode(out);
+}
+
+const FALLBACK_PROJECT_DOCS: Record<string, ProjectDocument[]> = {
+  "PRJ-001": [
+    {
+      document_id: "doc-ich-q3dr2",
+      source_id: "ICH-Q3DR2",
+      title: "Guideline for Elemental Impurities Q3D(R2)",
+      authority: "ICH",
+      attribution:
+        "© ICH. Reproduced in accordance with ICH copyright terms; no ICH endorsement implied.",
+      latest_version: {
+        version_id: "ver-q3dr2-v1",
+        version_number: 1,
+        version_label: "Q3D(R2)",
+        sha256: "2dc1fdcd014ba306d106cc29f7e51d2e3d06b57e6a9c6d63c485549a7bf85bc3",
+        byte_size: 1556075,
+        page_count: 88,
+        text_layer: "yes",
+        extraction_method: "pypdf",
+        extraction_status: "ok",
+        extraction_notes: [],
+      },
+      versions: [
+        {
+          version_id: "ver-q3dr2-v1",
+          version_number: 1,
+          version_label: "Q3D(R2)",
+          sha256: "2dc1fdcd014ba306d106cc29f7e51d2e3d06b57e6a9c6d63c485549a7bf85bc3",
+          byte_size: 1556075,
+          page_count: 88,
+          text_layer: "yes",
+          extraction_method: "pypdf",
+          extraction_status: "ok",
+          extraction_notes: [],
+        },
+      ],
+      preview_text:
+        "[Page 1] INTERNATIONAL COUNCIL FOR HARMONISATION OF TECHNICAL REQUIREMENTS FOR PHARMACEUTICALS FOR HUMAN USE — ICH HARMONISED GUIDELINE FOR ELEMENTAL IMPURITIES Q3D(R2). Oral PDE limits: Cd 5 ug/day, Pb 5 ug/day, As 15 ug/day, Hg 30 ug/day.",
+    },
+    {
+      document_id: "doc-fda-pv-2011",
+      source_id: "FDA-PV-2011",
+      title: "Process Validation: General Principles and Practices",
+      authority: "FDA",
+      attribution: "U.S. Food and Drug Administration (FDA) public domain guidance (Jan 2011).",
+      latest_version: {
+        version_id: "ver-pv-v1",
+        version_number: 1,
+        version_label: "Final (Jan 2011)",
+        sha256: "9b415a0214a56f9e3685161f7736e2c229a315457ab87b8875b4d2a3d7f0c945",
+        byte_size: 380828,
+        page_count: 22,
+        text_layer: "yes",
+        extraction_method: "pypdf",
+        extraction_status: "ok",
+        extraction_notes: [],
+      },
+      versions: [
+        {
+          version_id: "ver-pv-v1",
+          version_number: 1,
+          version_label: "Final (Jan 2011)",
+          sha256: "9b415a0214a56f9e3685161f7736e2c229a315457ab87b8875b4d2a3d7f0c945",
+          byte_size: 380828,
+          page_count: 22,
+          text_layer: "yes",
+          extraction_method: "pypdf",
+          extraction_status: "ok",
+          extraction_notes: [],
+        },
+      ],
+      preview_text:
+        "[Page 1] Guidance for Industry: Process Validation: General Principles and Practices. Stage 1 Process Design, Stage 2 Process Qualification, Stage 3 Continued Process Verification.",
+    },
+  ],
+  "PRJ-002": [
+    {
+      document_id: "doc-ich-m9",
+      source_id: "ICH-M9",
+      title: "Biopharmaceutics Classification System-based Biowaivers M9",
+      authority: "ICH",
+      attribution:
+        "© ICH. Reproduced in accordance with ICH copyright terms; no ICH endorsement implied.",
+      latest_version: {
+        version_id: "ver-m9-v1",
+        version_number: 1,
+        version_label: "Step 4 (Nov 2019)",
+        sha256: "418c8192dc2b8c32a9d2224322a830242d1a0a835a1d994162c7b111600eb9eb",
+        byte_size: 227095,
+        page_count: 19,
+        text_layer: "yes",
+        extraction_method: "pypdf",
+        extraction_status: "ok",
+        extraction_notes: [],
+      },
+      versions: [
+        {
+          version_id: "ver-m9-v1",
+          version_number: 1,
+          version_label: "Step 4 (Nov 2019)",
+          sha256: "418c8192dc2b8c32a9d2224322a830242d1a0a835a1d994162c7b111600eb9eb",
+          byte_size: 227095,
+          page_count: 19,
+          text_layer: "yes",
+          extraction_method: "pypdf",
+          extraction_status: "ok",
+          extraction_notes: [],
+        },
+      ],
+      preview_text:
+        "[Page 1] ICH Harmonised Guideline: Biopharmaceutics Classification System-based Biowaivers M9. High solubility and high permeability BCS Class I and III criteria.",
+    },
+  ],
+};
+
 export function App(): React.ReactElement {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("research");
   const [selectedProject, setSelectedProject] = useState<string>("PRJ-001");
   const [session, setSession] = useState<OidcSession | null>(() => createDevSession("scientist"));
   const [apiHealth, setApiHealth] = useState<"checking" | "ok" | "offline">("checking");
   const [sources, setSources] = useState<DocumentMetadata[]>(FALLBACK_SOURCES);
+
+  // Document Library UI state (S2-05)
+  const [projectDocs, setProjectDocs] = useState<ProjectDocument[]>(
+    FALLBACK_PROJECT_DOCS["PRJ-001"]
+  );
+  const [uploadSourceId, setUploadSourceId] = useState<string>("ICH-Q3DR2");
+  const [uploadVersionLabel, setUploadVersionLabel] = useState<string>("Revision 2");
+  const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null);
+  const [uploadLoading, setUploadLoading] = useState<boolean>(false);
+  const [uploadFeedback, setUploadFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
 
   // Research & Strategy state
   const [queryText, setQueryText] = useState<string>(
@@ -126,7 +291,7 @@ export function App(): React.ReactElement {
   useEffect(() => {
     let mounted = true;
     if (session?.role) {
-      requestDevToken(session.role, [selectedProject]).then((token) => {
+      requestDevToken(session.role, ["PRJ-001", "PRJ-002"]).then((token) => {
         if (mounted && token && token !== session.accessToken) {
           setSession((prev) => (prev ? { ...prev, accessToken: token } : null));
         }
@@ -201,6 +366,71 @@ export function App(): React.ReactElement {
       mounted = false;
     };
   }, [activeTab, session?.accessToken, session?.role, filterProject, filterAction, filterActor]);
+
+  useEffect(() => {
+    let mounted = true;
+    const fallback = FALLBACK_PROJECT_DOCS[selectedProject] || [];
+    if (!session?.accessToken) {
+      setProjectDocs(fallback);
+      return;
+    }
+    fetchProjectDocuments(selectedProject, session.accessToken)
+      .then((docs) => {
+        if (mounted) {
+          setProjectDocs(docs.length > 0 ? docs : fallback);
+        }
+      })
+      .catch(() => {
+        if (mounted) setProjectDocs(fallback);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [selectedProject, session?.accessToken]);
+
+  async function handleDocumentUpload(useSampleRevision: boolean) {
+    setUploadLoading(true);
+    setUploadFeedback(null);
+    try {
+      let fileBytes: ArrayBuffer | Uint8Array;
+      if (!useSampleRevision && selectedPdfFile) {
+        fileBytes = await selectedPdfFile.arrayBuffer();
+      } else {
+        const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
+        fileBytes = buildSamplePdfBytes([
+          `Regulatory Guidance Source ${uploadSourceId} - Project ${selectedProject}`,
+          `Version Label: ${uploadVersionLabel || "Revision Update"} (${stamp} UTC)`,
+          "Page 1: Cadmium oral permitted daily exposure 5 ug/day; NDMA AI limit 96 ng/day.",
+          "Page 2: Validated excipient control strategy and continued process verification.",
+        ]);
+      }
+      const res = await uploadSourceDocument({
+        sourceId: uploadSourceId,
+        projectId: selectedProject,
+        fileBytes,
+        versionLabel: uploadVersionLabel,
+        accessToken: session?.accessToken,
+      });
+      setUploadFeedback({
+        type: "success",
+        message: res.already_ingested
+          ? `Already Ingested: ${res.source_id} v${res.version_number} (${res.page_count} pages, status=${res.extraction_status})`
+          : `Ingested ${res.source_id} v${res.version_number} → status: ${res.extraction_status} (${res.page_count} pages, text_layer: ${res.text_layer}, SHA-256: ${res.sha256.slice(0, 16)}...)`,
+      });
+      const updated = await fetchProjectDocuments(selectedProject, session?.accessToken);
+      if (updated.length > 0) {
+        setProjectDocs(updated);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Document upload failed";
+      setUploadFeedback({
+        type: "error",
+        message: msg,
+      });
+    } finally {
+      setUploadLoading(false);
+    }
+  }
 
   async function handleRunQuery(e: React.FormEvent) {
     e.preventDefault();
@@ -389,6 +619,171 @@ export function App(): React.ReactElement {
             {activeTab === "research" && (
               <div className="two-column-grid">
                 <section className="card" aria-labelledby="sources-heading">
+                  <h2>Project Document Library — {selectedProject} ({projectDocs.length})</h2>
+                  <p className="muted">
+                    Upload PDF versions into <strong>{selectedProject}</strong>, inspect extraction
+                    status, text-layer uncertainty flags, extracted text previews, and version
+                    history (S2-05 / ADR-007).
+                  </p>
+
+                  <div className="upload-panel" aria-label="Document Upload Form">
+                    <h3>Ingest Document Version (Admin Role per ADR-007)</h3>
+                    <div className="upload-grid">
+                      <label>
+                        Approved Source ID:
+                        <select
+                          aria-label="Select Approved Source ID"
+                          value={uploadSourceId}
+                          onChange={(e) => setUploadSourceId(e.target.value)}
+                        >
+                          <option value="ICH-Q3DR2">ICH-Q3DR2 — Elemental Impurities (Eligible)</option>
+                          <option value="FDA-PV-2011">FDA-PV-2011 — Process Validation (Eligible)</option>
+                          <option value="ICH-M7R2">ICH-M7R2 — Mutagenic Impurities (Eligible)</option>
+                          <option value="ICH-M9">ICH-M9 — BCS Biowaivers (Eligible)</option>
+                          <option value="FDA-BA-2022">FDA-BA-2022 — Bioavailability Studies (Eligible)</option>
+                          <option value="ICH-Q9R1">ICH-Q9R1 — Quality Risk Management (Eligible)</option>
+                          <option value="ICH-Q8R2">ICH-Q8R2 — Pharm Dev (HELD — Tests 409 Rule)</option>
+                        </select>
+                      </label>
+                      <label>
+                        Version Label:
+                        <input
+                          type="text"
+                          aria-label="Version Label"
+                          value={uploadVersionLabel}
+                          onChange={(e) => setUploadVersionLabel(e.target.value)}
+                          placeholder="e.g. Revision 2"
+                        />
+                      </label>
+                    </div>
+                    <div className="form-row">
+                      <input
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        aria-label="Select PDF File"
+                        onChange={(e) => setSelectedPdfFile(e.target.files?.[0] || null)}
+                      />
+                      <div className="button-group">
+                        {selectedPdfFile && (
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            disabled={uploadLoading}
+                            onClick={() => handleDocumentUpload(false)}
+                          >
+                            {uploadLoading ? "Extracting..." : "Upload Selected PDF"}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          disabled={uploadLoading}
+                          onClick={() => handleDocumentUpload(true)}
+                        >
+                          {uploadLoading ? "Extracting PDF..." : "Upload Sample Revision PDF"}
+                        </button>
+                      </div>
+                    </div>
+                    {uploadFeedback && (
+                      <div
+                        className={`upload-status ${uploadFeedback.type}`}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {uploadFeedback.message}
+                      </div>
+                    )}
+                  </div>
+
+                  <ul className="source-list" aria-label="Project Ingested Documents">
+                    {[...projectDocs]
+                      .sort((a, b) => {
+                        if (a.source_id === uploadSourceId && b.source_id !== uploadSourceId)
+                          return -1;
+                        if (b.source_id === uploadSourceId && a.source_id !== uploadSourceId)
+                          return 1;
+                        return b.latest_version.version_number - a.latest_version.version_number;
+                      })
+                      .map((doc) => {
+                      const ver = doc.latest_version;
+                      const versions = doc.versions && doc.versions.length > 0 ? doc.versions : [ver];
+                      const isStatusOk = ver.extraction_status === "ok";
+                      const isTextLayerFull = ver.text_layer === "yes";
+                      return (
+                        <li key={doc.document_id} className="source-item">
+                          <div className="source-header">
+                            <span className="publisher-tag">{doc.authority}</span>
+                            <strong>{doc.title}</strong>
+                            <code className="hash-code">{doc.source_id}</code>
+                          </div>
+
+                          <div className="doc-badges">
+                            <span className={isStatusOk ? "badge-verified" : "badge-unverified"}>
+                              Status: {(ver.extraction_status || "ok").toUpperCase()} (Extracted)
+                            </span>
+                            <span className={isTextLayerFull ? "badge-verified" : "badge-warning"}>
+                              {isTextLayerFull
+                                ? "Text Layer: YES (Selectable)"
+                                : `⚠ Uncertainty Flag: Text Layer ${(ver.text_layer || "no").toUpperCase()}`}
+                            </span>
+                            <span className="hash-code">
+                              Latest: v{ver.version_number}
+                              {ver.version_label ? ` (${ver.version_label})` : ""}
+                            </span>
+                          </div>
+
+                          <div className="source-meta">
+                            <span>Pages: {ver.page_count ?? "-"}</span>
+                            <span>Engine: {ver.extraction_method ?? "pypdf"}</span>
+                            <span>Size: {(ver.byte_size / 1024).toFixed(1)} KB</span>
+                          </div>
+
+                          <code className="hash-code" title="SHA-256 Provenance Fingerprint">
+                            SHA-256: {ver.sha256.slice(0, 24)}...
+                          </code>
+
+                          {ver.extraction_notes && ver.extraction_notes.length > 0 && (
+                            <div className="attribution-note" role="note">
+                              <strong>Extraction Uncertainty Notes:</strong>{" "}
+                              {ver.extraction_notes.join("; ")}
+                            </div>
+                          )}
+
+                          {doc.attribution && (
+                            <div className="attribution-note">
+                              <strong>Mandatory Attribution (ADR-002):</strong> {doc.attribution}
+                            </div>
+                          )}
+
+                          {doc.preview_text && (
+                            <div className="doc-preview-box" aria-label="Extracted Text Preview">
+                              <strong>Extracted Text Preview:</strong>
+                              {"\n"}
+                              {doc.preview_text}
+                            </div>
+                          )}
+
+                          <div className="version-history-box">
+                            <strong>Version History ({versions.length}):</strong>
+                            <ul className="version-history-list">
+                              {versions.map((v) => (
+                                <li key={v.version_id} className="version-history-item">
+                                  <span>
+                                    <strong>v{v.version_number}</strong>
+                                    {v.version_label ? ` — ${v.version_label}` : ""} ({v.page_count ?? 0}p,{" "}
+                                    {v.extraction_status || "ok"})
+                                  </span>
+                                  <code className="hash-code">SHA-256: {v.sha256.slice(0, 12)}...</code>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+
+                  <hr style={{ margin: "1.25rem 0", border: "none", borderTop: "1px solid #cbd5e1" }} />
                   <h2 id="sources-heading">Approved Regulatory Sources ({sources.length})</h2>
                   <p className="muted">
                     Only license-verified documents with cryptographic SHA-256 provenance are
@@ -660,6 +1055,10 @@ export function App(): React.ReactElement {
                         >
                           <option value="ALL">All Actions</option>
                           <option value="RESEARCH_QUERY_EXECUTED">RESEARCH_QUERY_EXECUTED</option>
+                          <option value="DOCUMENT_INGESTED">DOCUMENT_INGESTED</option>
+                          <option value="DOCUMENT_ALREADY_INGESTED">DOCUMENT_ALREADY_INGESTED</option>
+                          <option value="DOCUMENT_INGEST_REFUSED">DOCUMENT_INGEST_REFUSED</option>
+                          <option value="DOCUMENTS_LISTED">DOCUMENTS_LISTED</option>
                           <option value="TRIAL_VERIFICATION_APPROVED">
                             TRIAL_VERIFICATION_APPROVED
                           </option>

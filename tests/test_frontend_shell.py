@@ -43,3 +43,19 @@ def test_frontend_openapi_client_and_oidc_pkce_exist() -> None:
     assert "/api/v1/research/query" in client_ts
     assert "code_challenge_method" in oidc_ts
     assert "S256" in oidc_ts
+
+
+def test_frontend_document_library_ui_exists() -> None:
+    """Verify Document Library UI (S2-05) supports upload, status, text preview, and version history."""
+    client_ts = (FRONTEND_DIR / "src" / "api" / "client.ts").read_text(encoding="utf-8")
+    app_tsx = (FRONTEND_DIR / "src" / "App.tsx").read_text(encoding="utf-8")
+
+    assert "fetchProjectDocuments" in client_ts
+    assert "uploadSourceDocument" in client_ts
+    assert "/api/v1/projects/" in client_ts
+    assert "/api/v1/sources/" in client_ts
+
+    assert "Project Document Library" in app_tsx
+    assert "Extracted Text Preview" in app_tsx
+    assert "Version History" in app_tsx
+    assert "Uncertainty Flag" in app_tsx

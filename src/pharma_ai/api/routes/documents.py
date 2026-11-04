@@ -11,6 +11,7 @@ request fails with 503 and nothing is saved (ingestion is committed only after t
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Annotated
 
@@ -89,6 +90,25 @@ class ProjectDocumentOut(BaseModel):
     authority: str
     attribution: str | None  # must be shown next to any citation of this document
     latest_version: VersionOut
+    versions: list[VersionOut] = []
+    preview_text: str | None = None
+
+
+def _extract_preview(
+    store: ObjectStore, extracted_key: str | None, max_chars: int = 400
+) -> str | None:
+    if not extracted_key or not store.exists(extracted_key):
+        return None
+    try:
+        payload = json.loads(store.get(extracted_key).decode("utf-8"))
+        for page in payload.get("pages", []):
+            text = (page.get("text") or "").strip()
+            if text:
+                snippet = text[:max_chars] + ("..." if len(text) > max_chars else "")
+                return f"[Page {page.get('page', 1)}] {snippet}"
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return None
 
 
 def _version_out(version: DocumentVersion) -> VersionOut:
@@ -267,12 +287,13 @@ def list_project_documents(
     principal: CurrentPrincipal,
     audit: AuditRecorderDep,
     session: SessionDep,
+    store: StoreDep,
 ) -> list[ProjectDocumentOut]:
     """Membership is checked first, so a 403 does not reveal which projects exist."""
     ensure_project_access(principal, project_id)
-    rows = DocumentRepository(session).latest_versions_for_project(
-        project_id, principal.project_ids
-    )
+    repo = DocumentRepository(session)
+    rows = repo.latest_versions_for_project(project_id, principal.project_ids)
+    all_versions = repo.versions_for_documents(doc.document_id for doc, _, _ in rows)
     audit.success(
         "DOCUMENTS_LISTED",
         "project",
@@ -288,6 +309,8 @@ def list_project_documents(
             authority=source.authority,
             attribution=source.attribution,
             latest_version=_version_out(version),
+            versions=[_version_out(v) for v in all_versions.get(document.document_id, [version])],
+            preview_text=_extract_preview(store, version.extracted_key),
         )
         for document, source, version in rows
     ]
