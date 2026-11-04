@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     # back to pypdf if Tika cannot be reached.
     extraction_engine: Literal["pypdf", "tika"] = "pypdf"
 
+    # Chunking and embeddings (S2-06, ADR-008). The model must give 384-number vectors (the size of
+    # the database column); changing it means the stored passages are embedded again.
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_batch_size: int = 32
+    # Passages are cut to at most this many tokens, repeating the last `overlap` tokens at the start
+    # of the next one (ADR-003). The model reads 512 tokens including two markers, so keep it below.
+    chunk_size: int = 500
+    chunk_overlap: int = 100
+
     # Where the audit trail is stored (S1-11). "memory" is for tests and database-less local runs
     # and is refused unless ENVIRONMENT is local or test.
     audit_backend: Literal["database", "memory"] = "database"

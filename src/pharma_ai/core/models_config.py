@@ -21,9 +21,11 @@ class OpenSourceModelConfig(BaseModel):
     max_tokens: int = Field(1024, description="Maximum tokens generated per response")
 
     # Dense Embedding Settings
+    # The indexing scripts read EMBEDDING_MODEL from the environment (core/config.py); this default
+    # is kept in line with it (ADR-003, ADR-008).
     embedding_model_name: str = Field(
-        "sentence-transformers/all-MiniLM-L6-v2",
-        description="CPU/GPU fast dense embedding model (e.g. all-MiniLM-L6-v2 or BAAI/bge-small-en-v1.5)",
+        "BAAI/bge-small-en-v1.5",
+        description="CPU/GPU fast dense embedding model (384 numbers per passage, ADR-003)",
     )
 
     # Reranker Settings

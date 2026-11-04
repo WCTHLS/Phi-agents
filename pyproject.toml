@@ -34,6 +34,10 @@ dev = [
 observability = [
   "opentelemetry-api>=1.24,<2.0",
 ]
+# The embedding model used by scripts/index_chunks.py (S2-06). Pulls in PyTorch (several hundred MB).
+embeddings = [
+  "sentence-transformers>=3.0,<6.0",
+]
 research = [
   "haystack-ai>=2.0,<3.0",
   "sentence-transformers>=3.0,<6.0",
