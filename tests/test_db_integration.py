@@ -66,6 +66,7 @@ pytestmark = pytest.mark.skipif(
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOOD_SHA = "a" * 64
 NOW = datetime(2026, 10, 29, tzinfo=UTC)
+MODEL = "test-model"  # the embedding model name the test chunks are stored under
 
 TABLES = {
     "roles",
@@ -481,7 +482,7 @@ def _two_projects_with_one_document_each(session: Session) -> dict[str, Document
                     section="Table 1",
                     text=f"passage from {source_id}",
                     embedding=_unit_vector(position),
-                    embedding_model="test-model",
+                    embedding_model=MODEL,
                 )
             ],
         )
@@ -493,13 +494,15 @@ def test_search_returns_only_chunks_from_the_callers_projects(session: Session) 
     _two_projects_with_one_document_each(session)
     chunks = ChunkRepository(session)
     # Query vector is identical to the PRJ-002 chunk, but the caller only has PRJ-001.
-    hits = chunks.search_nearest(_unit_vector(1), ["PRJ-001"], limit=5)
+    hits = chunks.search_nearest(_unit_vector(1), ["PRJ-001"], embedding_model=MODEL, limit=5)
     assert [h.source_id for h in hits] == ["ICH-Q3DR2"]
 
 
 def test_search_with_both_projects_returns_nearest_first(session: Session) -> None:
     _two_projects_with_one_document_each(session)
-    hits = ChunkRepository(session).search_nearest(_unit_vector(1), ["PRJ-001", "PRJ-002"])
+    hits = ChunkRepository(session).search_nearest(
+        _unit_vector(1), ["PRJ-001", "PRJ-002"], embedding_model=MODEL
+    )
     assert [h.source_id for h in hits] == ["ICH-Q3CR9", "ICH-Q3DR2"]
     assert hits[0].distance == pytest.approx(0.0, abs=1e-6)
     assert hits[1].distance == pytest.approx(1.0, abs=1e-6)  # unrelated direction
@@ -508,13 +511,15 @@ def test_search_with_both_projects_returns_nearest_first(session: Session) -> No
 def test_search_with_no_allowed_projects_returns_nothing(session: Session) -> None:
     _two_projects_with_one_document_each(session)
     chunks = ChunkRepository(session)
-    assert chunks.search_nearest(_unit_vector(0), []) == []
-    assert chunks.search_nearest(_unit_vector(0), ["PRJ-999"]) == []
+    assert chunks.search_nearest(_unit_vector(0), [], embedding_model=MODEL) == []
+    assert chunks.search_nearest(_unit_vector(0), ["PRJ-999"], embedding_model=MODEL) == []
 
 
 def test_search_hits_carry_what_a_citation_needs(session: Session) -> None:
     _two_projects_with_one_document_each(session)
-    hit = ChunkRepository(session).search_nearest(_unit_vector(0), ["PRJ-001"])[0]
+    hit = ChunkRepository(session).search_nearest(
+        _unit_vector(0), ["PRJ-001"], embedding_model=MODEL
+    )[0]
     assert hit.source_id == "ICH-Q3DR2"
     assert hit.version_label == "Revision 1"
     assert (hit.page_start, hit.page_end, hit.section) == (3, 4, "Table 1")
@@ -537,7 +542,9 @@ def test_search_also_checks_eligibility_if_the_foreign_key_were_bypassed(session
     session.execute(
         text("update sources set eligible = false, tier = 'hold' where source_id = 'ICH-Q3DR2'")
     )
-    hits = ChunkRepository(session).search_nearest(_unit_vector(0), ["PRJ-001", "PRJ-002"])
+    hits = ChunkRepository(session).search_nearest(
+        _unit_vector(0), ["PRJ-001", "PRJ-002"], embedding_model=MODEL
+    )
     assert [h.source_id for h in hits] == ["ICH-Q3CR9"]
 
 
@@ -550,13 +557,103 @@ def test_search_ignores_chunks_that_have_no_embedding_yet(session: Session) -> N
         version.version_id,
         [ChunkInput(chunk_index=1, page_start=1, page_end=1, text="not embedded yet")],
     )
-    hits = ChunkRepository(session).search_nearest(_unit_vector(0), ["PRJ-001"], limit=10)
+    hits = ChunkRepository(session).search_nearest(
+        _unit_vector(0), ["PRJ-001"], embedding_model=MODEL, limit=10
+    )
     assert len(hits) == 1
+
+
+def test_search_never_compares_numbers_made_by_a_different_model(session: Session) -> None:
+    """A chunk from another model may sit closest by chance; it must not be returned."""
+    docs = _two_projects_with_one_document_each(session)
+    version = (
+        session.query(DocumentVersion).filter_by(document_id=docs["PRJ-001"].document_id).one()
+    )
+    ChunkRepository(session).add_chunks(
+        version.version_id,
+        [
+            ChunkInput(
+                chunk_index=1,
+                page_start=1,
+                page_end=1,
+                text="made by another model, an exact match for the question",
+                embedding=_unit_vector(1),
+                embedding_model="other-model",
+            )
+        ],
+    )
+    chunks = ChunkRepository(session)
+    hits = chunks.search_nearest(
+        _unit_vector(1), ["PRJ-001", "PRJ-002"], embedding_model=MODEL, limit=10
+    )
+    assert {h.text for h in hits} == {"passage from ICH-Q3DR2", "passage from ICH-Q3CR9"}
+    other = chunks.search_nearest(_unit_vector(1), ["PRJ-001"], embedding_model="other-model")
+    assert [h.text for h in other] == ["made by another model, an exact match for the question"]
+    assert chunks.search_nearest(_unit_vector(1), ["PRJ-001"], embedding_model="nobody") == []
+
+
+def test_the_embedding_model_must_always_be_named(session: Session) -> None:
+    """Leaving it out would compare numbers from different models, so it is not allowed."""
+    with pytest.raises(TypeError, match="embedding_model"):
+        ChunkRepository(session).search_nearest(_unit_vector(0), ["PRJ-001"])  # type: ignore[call-arg]
+
+
+def _add_newer_version(session: Session, document: Document, *, position: int) -> DocumentVersion:
+    docs = DocumentRepository(session)
+    version = docs.add_version(
+        document_id=document.document_id,
+        version_number=2,
+        version_label="Revision 2",
+        sha256=uuid.uuid4().hex + uuid.uuid4().hex,
+        object_key="originals/newer.pdf",
+        byte_size=100,
+        retrieved_at=NOW,
+    )
+    ChunkRepository(session).add_chunks(
+        version.version_id,
+        [
+            ChunkInput(
+                chunk_index=0,
+                page_start=1,
+                page_end=1,
+                text="passage from the newer revision",
+                embedding=_unit_vector(position),
+                embedding_model=MODEL,
+            )
+        ],
+    )
+    return version
+
+
+def test_search_uses_only_the_newest_version_of_a_document_by_default(session: Session) -> None:
+    docs = _two_projects_with_one_document_each(session)
+    # The old version's chunk is an exact match; the newer version's chunk is far from it.
+    _add_newer_version(session, docs["PRJ-001"], position=5)
+    chunks = ChunkRepository(session)
+
+    hits = chunks.search_nearest(_unit_vector(0), ["PRJ-001"], embedding_model=MODEL, limit=10)
+    assert [(h.version_number, h.text) for h in hits] == [(2, "passage from the newer revision")]
+    assert hits[0].version_label == "Revision 2"
+
+    everything = chunks.search_nearest(
+        _unit_vector(0), ["PRJ-001"], embedding_model=MODEL, limit=10, latest_only=False
+    )
+    assert [h.version_number for h in everything] == [1, 2]  # nearest first: the old exact match
+
+
+def test_the_newest_version_is_chosen_per_document(session: Session) -> None:
+    """One document with a new version must not hide a different document's only version."""
+    docs = _two_projects_with_one_document_each(session)
+    _add_newer_version(session, docs["PRJ-001"], position=5)
+    hits = ChunkRepository(session).search_nearest(
+        _unit_vector(1), ["PRJ-001", "PRJ-002"], embedding_model=MODEL, limit=10
+    )
+    assert {(h.source_id, h.version_number) for h in hits} == {("ICH-Q3DR2", 2), ("ICH-Q3CR9", 1)}
 
 
 def test_search_rejects_a_query_of_the_wrong_size(session: Session) -> None:
     with pytest.raises(ValueError, match="expected 384"):
-        ChunkRepository(session).search_nearest([0.1] * 5, ["PRJ-001"])
+        ChunkRepository(session).search_nearest([0.1] * 5, ["PRJ-001"], embedding_model=MODEL)
 
 
 def test_project_repository_hides_projects_the_caller_cannot_access(session: Session) -> None:

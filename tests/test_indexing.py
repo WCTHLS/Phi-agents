@@ -235,7 +235,9 @@ def test_a_question_finds_the_passage_that_answers_it_with_everything_a_citation
     _indexer(session, store, embedder).index_version(ingested.version_id)
 
     question = embedder.embed(["what is the oral exposure of cadmium per day"])[0]
-    hits = ChunkRepository(session).search_nearest(question, ["PRJ-001"], limit=3)
+    hits = ChunkRepository(session).search_nearest(
+        question, ["PRJ-001"], embedding_model=embedder.model_name, limit=3
+    )
 
     best = hits[0]
     assert (best.source_id, best.version_number, best.sha256) == (ELIGIBLE, 1, ingested.sha256)
@@ -243,4 +245,9 @@ def test_a_question_finds_the_passage_that_answers_it_with_everything_a_citation
     assert "Cadmium has an oral permitted daily exposure" in best.text
     assert best.distance < hits[1].distance
     # A project that was not granted the document gets nothing.
-    assert ChunkRepository(session).search_nearest(question, ["PRJ-002"], limit=3) == []
+    assert (
+        ChunkRepository(session).search_nearest(
+            question, ["PRJ-002"], embedding_model=embedder.model_name, limit=3
+        )
+        == []
+    )

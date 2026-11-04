@@ -155,7 +155,11 @@ def engine(tmp_path: Path) -> Iterator[Engine]:
         store = LocalFolderStore(tmp_path / "files")
         ingestion = DocumentIngestionService(session, store, max_bytes=5_000_000)
         indexing = DocumentIndexingService(
-            session, store, FakeEmbedder(), max_tokens=20, overlap_tokens=0
+            session,
+            store,
+            FakeEmbedder(script.settings.embedding_model),
+            max_tokens=20,
+            overlap_tokens=0,
         )
         for source_id, pages in PAGES.items():
             result = ingestion.ingest(
@@ -285,7 +289,7 @@ def test_a_model_that_cannot_be_loaded_is_reported(
 def test_the_query_prefix_goes_in_front_of_each_question_and_is_saved(
     engine: Engine, tmp_path: Path, questions_file: Path
 ) -> None:
-    embedder = FakeEmbedder()
+    embedder = FakeEmbedder(script.settings.embedding_model)
     saved = tmp_path / "run.json"
     run(
         tmp_path,
@@ -318,3 +322,14 @@ def test_evidence_pages_come_from_the_newest_version_of_a_document(
     assert after is not None and len(after) == 3 and "Revised text" in after[0]["text"]
     with Session(engine) as session:
         assert script.load_pages(session, store, "ICH-M9") is None  # never ingested
+
+
+@needs_db
+def test_passages_made_by_another_model_are_not_searched_and_the_report_says_why(
+    engine: Engine, tmp_path: Path, questions_file: Path
+) -> None:
+    code, out = run(tmp_path, questions_file, embedder=FakeEmbedder("some-other-model"))
+    assert code == 0
+    assert "no results at all" in out.lower()
+    assert "some-other-model" in out
+    assert "right passage -> top 1: 0/3" in out

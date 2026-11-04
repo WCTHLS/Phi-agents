@@ -29,6 +29,21 @@ from pharma_ai.infrastructure.db.models import (
 )
 
 
+def _newest_versions() -> Any:
+    """A subquery giving the highest version number of every document.
+
+    Joined on (document_id, version_number) it keeps only each document's newest version.
+    """
+    return (
+        select(
+            DocumentVersion.document_id.label("document_id"),
+            func.max(DocumentVersion.version_number).label("version_number"),
+        )
+        .group_by(DocumentVersion.document_id)
+        .subquery()
+    )
+
+
 class ProjectRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -138,15 +153,7 @@ class DocumentRepository:
         """
         if project_id not in set(allowed_project_ids):
             return []
-        # The highest version number of every document, to keep only the newest version below.
-        newest = (
-            select(
-                DocumentVersion.document_id.label("document_id"),
-                func.max(DocumentVersion.version_number).label("version_number"),
-            )
-            .group_by(DocumentVersion.document_id)
-            .subquery()
-        )
+        newest = _newest_versions()
         stmt = (
             select(Document, Source, DocumentVersion)
             .join(ProjectDocument, ProjectDocument.document_id == Document.document_id)
@@ -255,13 +262,20 @@ class ChunkRepository:
         query_embedding: Sequence[float],
         allowed_project_ids: Iterable[str],
         *,
+        embedding_model: str,
         limit: int = 5,
+        latest_only: bool = True,
     ) -> list[ChunkHit]:
         """Return the closest chunks the caller may see.
 
         The permission filter and the eligibility check are in the same SQL statement as the
         vector search, so unauthorised text never leaves the database. With no allowed projects
         the result is empty.
+
+        ``embedding_model`` is required: a question's numbers only mean something next to numbers
+        made by the same model, so chunks made by any other model are never compared. By default
+        only the newest version of each document is searched; ``latest_only=False`` includes the
+        older versions too (they stay in the database so earlier citations still resolve).
         """
         projects = list(allowed_project_ids)
         if not projects:
@@ -280,10 +294,24 @@ class ChunkRepository:
             .join(DocumentVersion, DocumentVersion.version_id == Chunk.version_id)
             .join(Document, Document.document_id == DocumentVersion.document_id)
             .join(Source, Source.source_id == Document.source_id)
-            .where(Chunk.embedding.is_not(None), Source.eligible.is_(True), has_access)
+            .where(
+                Chunk.embedding.is_not(None),
+                Chunk.embedding_model == embedding_model,
+                Source.eligible.is_(True),
+                has_access,
+            )
             .order_by(distance)
             .limit(limit)
         )
+        if latest_only:
+            newest = _newest_versions()
+            stmt = stmt.join(
+                newest,
+                and_(
+                    newest.c.document_id == DocumentVersion.document_id,
+                    newest.c.version_number == DocumentVersion.version_number,
+                ),
+            )
         hits = []
         for chunk, version, source, dist in self._session.execute(stmt):
             hits.append(

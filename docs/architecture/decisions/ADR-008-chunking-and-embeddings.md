@@ -39,7 +39,7 @@
   - **Page furniture is heuristic.** A repeated header that ends like a sentence is kept (safe: nothing is deleted); a one-off header is not recognised.
   - **No unit tests prove retrieval quality.** The tests use a stand-in embedding model that counts words, to check the plumbing. The real model is checked by running the script.
 - **Not done here, for S2-07 and later:**
-  - `search_nearest` does not yet limit results to chunks made by the current model, or to the newest version of a document. Both matter as soon as a second model or version exists.
+  - ~~`search_nearest` does not limit results to the current model or the newest version.~~ Done in S2-07 step 1: `search_nearest` now requires the embedding model's name and by default searches only the newest version of each document (`latest_only=False` includes older ones).
   - The question must be embedded by the same model when searching; the API image does not include the library yet (it adds roughly a gigabyte, so decide how the API gets the model, or whether it calls a separate service).
   - The upload endpoint does not index; documents are indexed by running the script.
   - To try, with the golden questions as the measure: put the document title and section in front of each chunk before embedding (this may help questions that name a document); keyword matching alongside vector search; searching each named document separately.

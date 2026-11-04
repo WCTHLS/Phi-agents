@@ -38,7 +38,7 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "src"))
@@ -59,15 +59,37 @@ from pharma_ai.infrastructure.storage import LocalFolderStore, ObjectNotFoundErr
 CUTOFFS = (1, 3, 5)
 DEFAULT_QUESTIONS = HERE / "golden_questions.csv"
 
-# A retriever takes (session, question vector, project ids, how many) and returns ranked hits.
-# S2-07 adds its hybrid search here, so it can be measured the same way as the plain vector search.
-Retriever = Callable[[Session, Sequence[float], Sequence[str], int], list[ChunkHit]]
+
+class Retriever(Protocol):
+    """A search under test. S2-07 adds its hybrid search here, so it is measured the same way as
+    the plain vector search. It gets the question text (for keyword search), the question's
+    numbers (for vector search), the projects the caller may see, how many results to return and
+    the name of the embedding model that made the stored passages."""
+
+    def __call__(
+        self,
+        session: Session,
+        *,
+        question: str,
+        vector: Sequence[float],
+        projects: Sequence[str],
+        limit: int,
+        model_name: str,
+    ) -> list[ChunkHit]: ...
 
 
 def dense(
-    session: Session, vector: Sequence[float], projects: Sequence[str], limit: int
+    session: Session,
+    *,
+    question: str,
+    vector: Sequence[float],
+    projects: Sequence[str],
+    limit: int,
+    model_name: str,
 ) -> list[ChunkHit]:
-    return ChunkRepository(session).search_nearest(vector, projects, limit=limit)
+    return ChunkRepository(session).search_nearest(
+        vector, projects, embedding_model=model_name, limit=limit
+    )
 
 
 RETRIEVERS: dict[str, Retriever] = {"dense": dense}
@@ -207,7 +229,14 @@ def evaluate(
 
     vectors = embedder.embed([query_prefix + q.text for q, _ in to_search])
     for (q, evidence), vector in zip(to_search, vectors, strict=True):
-        hits = retriever(session, vector, projects, max(CUTOFFS))
+        hits = retriever(
+            session,
+            question=q.text,
+            vector=vector,
+            projects=projects,
+            limit=max(CUTOFFS),
+            model_name=embedder.model_name,
+        )
         passage, document = score(hits, evidence)
         outcomes.append(
             Outcome(
@@ -237,7 +266,7 @@ def summarise(outcomes: Sequence[Outcome]) -> dict[str, Any]:
     }
 
 
-def print_report(outcomes: Sequence[Outcome]) -> None:
+def print_report(outcomes: Sequence[Outcome], model_name: str = "") -> None:
     print(f"{'question':9} {'passage 1 3 5':14} {'document 1 3 5':15} best result / note")
     for o in outcomes:
         if o.status == "scored":
@@ -252,6 +281,12 @@ def print_report(outcomes: Sequence[Outcome]) -> None:
     for label, key in (("passage", "passage"), ("document", "document")):
         counts = ", ".join(f"top {c}: {s[key][str(c)]}/{n}" for c in CUTOFFS)
         print(f"  right {label} -> {counts}")
+    if n and all(o.best == describe(None) for o in outcomes if o.status == "scored"):
+        print(
+            "\nThe search returned no results at all. Either the documents are not indexed "
+            "(scripts/index_chunks.py), or they were indexed with a different embedding model "
+            f"than the one searched with ({model_name})."
+        )
 
 
 def print_comparison(before: dict[str, Any], outcomes: Sequence[Outcome]) -> None:
@@ -320,17 +355,17 @@ def main(
         )
 
     print(
-        f"model {model_name}, retriever {args.retriever}, projects {', '.join(projects)}, "
+        f"model {embedder.model_name}, retriever {args.retriever}, projects {', '.join(projects)}, "
         f"query prefix {args.query_prefix!r}\n"
     )
-    print_report(outcomes)
+    print_report(outcomes, embedder.model_name)
     if args.compare:
         print_comparison(json.loads(args.compare.read_text(encoding="utf-8")), outcomes)
     if args.save:
         args.save.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "settings": {
-                "model": model_name,
+                "model": embedder.model_name,
                 "retriever": args.retriever,
                 "projects": projects,
                 "query_prefix": args.query_prefix,
