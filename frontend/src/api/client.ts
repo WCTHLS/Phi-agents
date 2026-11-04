@@ -23,6 +23,9 @@ export interface Citation {
   section: string;
   page: number;
   quoted_evidence: string;
+  version_label?: string | null;
+  sha256?: string | null;
+  attribution?: string | null;
 }
 
 export interface EvidenceChunk {
@@ -33,10 +36,13 @@ export interface EvidenceChunk {
   page: number;
   text: string;
   similarity_score: number;
+  version_label?: string | null;
+  sha256?: string | null;
 }
 
 export interface ResearchQueryRequest {
   query: string;
+  project_id?: string | null;
   publisher_filter?: string[] | null;
   top_k?: number;
   strict_citation_mode?: boolean;
@@ -50,6 +56,33 @@ export interface ResearchResponse {
   confidence_score: number;
   verified: boolean;
   retrieved_evidence: EvidenceChunk[];
+  workflow_run_id?: string | null;
+  review_status?: ReviewGateStatus | null;
+}
+
+export type ReviewDecisionAction = "APPROVED" | "REJECTED" | "EVIDENCE_REQUESTED";
+export type ReviewGateStatus = "PENDING_EXPERT_REVIEW" | ReviewDecisionAction;
+
+export interface ReviewDecisionRequest {
+  workflow_run_id: string;
+  project_id: string;
+  decision: ReviewDecisionAction;
+  rationale: string;
+  query: string;
+  cited_sources: string[];
+}
+
+export interface ReviewHistoryEntry {
+  review_id: string;
+  workflow_run_id: string;
+  project_id: string;
+  decision: ReviewDecisionAction;
+  rationale: string;
+  reviewer_email: string;
+  reviewer_role: string;
+  cited_sources: string[];
+  timestamp: string;
+  audit_event_id: string;
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -100,6 +133,28 @@ export async function submitResearchQuery(
   return (await response.json()) as ResearchResponse;
 }
 
+export async function submitReviewDecision(
+  payload: ReviewDecisionRequest,
+  accessToken?: string
+): Promise<ReviewHistoryEntry> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+  const response = await fetch(`${API_BASE}/api/v1/research/reviews`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(`Review submission failed (${response.status})`);
+  }
+  return (await response.json()) as ReviewHistoryEntry;
+}
+
 export interface AuditEventItem {
   event_id: string;
   timestamp: string;
@@ -126,6 +181,7 @@ export async function fetchAuditEvents(
     projectId?: string;
     actor?: string;
     action?: string;
+    resourceId?: string;
     page?: number;
     pageSize?: number;
   }
@@ -138,6 +194,9 @@ export async function fetchAuditEvents(
   if (filters?.projectId && filters.projectId !== "ALL") params.append("project_id", filters.projectId);
   if (filters?.actor && filters.actor.trim()) params.append("actor", filters.actor.trim());
   if (filters?.action && filters.action !== "ALL") params.append("action", filters.action);
+  if (filters?.resourceId && filters.resourceId.trim()) {
+    params.append("resource_id", filters.resourceId.trim());
+  }
   if (filters?.page) params.append("page", String(filters.page));
   if (filters?.pageSize) params.append("page_size", String(filters.pageSize));
 
