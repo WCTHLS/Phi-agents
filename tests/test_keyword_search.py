@@ -148,7 +148,7 @@ def add_document(
             page_end=i + 1,
             text=body,
             section=(sections or [None] * len(texts))[i],
-            embedding=vector(i) if model else None,
+            embedding=vector(i % EMBEDDING_DIM) if model else None,
             embedding_model=model,
         )
         for i, body in enumerate(texts)
@@ -329,3 +329,96 @@ def test_a_vector_hit_has_no_keyword_score(session: Session) -> None:
     add_document(session, Q3D, "PRJ-001", ["lead"])
     hit = ChunkRepository(session).search_nearest(vector(0), ["PRJ-001"], embedding_model=MODEL)[0]
     assert hit.distance is not None and hit.keyword_score is None
+
+
+# --- common words are ignored on a corpus large enough to tell (ADR-009) -------------------------
+
+COMMON = "The drug passage {n} describes the product."
+
+
+def big_document(
+    session: Session, source_id: str, project: str, size: int, extra: dict[int, str] | None = None
+) -> None:
+    """``size`` passages that all contain 'drug', 'passage', 'product' and 'describes'; ``extra``
+    adds words to chosen passages (by position)."""
+    texts = [COMMON.format(n=n) + " " + (extra or {}).get(n, "") for n in range(size)]
+    add_document(session, source_id, project, texts)
+
+
+RARE = {3: "Lead is limited.", 7: "Mercury is limited.", 11: "Arsenic is limited."}
+
+
+@needs_db
+def test_words_found_in_most_passages_are_left_out_of_the_search(session: Session) -> None:
+    big_document(session, Q3D, "PRJ-001", 120, RARE)
+    # Without the rule every one of the 120 passages would match on "drug".
+    hits = search(session, "drug lead mercury arsenic", limit=200)
+    assert {h.page_start for h in hits} == {4, 8, 12}
+
+
+@needs_db
+def test_a_question_of_only_common_words_still_searches(session: Session) -> None:
+    big_document(session, Q3D, "PRJ-001", 120)
+    assert len(search(session, "drug product describes", limit=5)) == 5
+
+
+@needs_db
+def test_when_fewer_than_three_words_survive_the_rarest_three_are_used(session: Session) -> None:
+    big_document(session, Q3D, "PRJ-001", 120, RARE)
+    hits = search(session, "drug product lead", limit=200)
+    assert hits[0].page_start == 4  # the passage with the rare word comes first
+    assert len(hits) > 3  # the common words were brought back, so other passages match too
+
+
+@needs_db
+def test_a_small_corpus_keeps_every_word(session: Session) -> None:
+    # 50 passages are too few to say what is "common": 'drug' (in all 50) must still be searched,
+    # although the rule would have dropped it among 100 or more.
+    big_document(session, Q3D, "PRJ-001", 50, RARE)
+    assert len(search(session, "drug lead mercury arsenic", limit=100)) == 50
+
+
+@needs_db
+def test_how_common_a_word_is_counts_only_the_passages_the_caller_can_see(session: Session) -> None:
+    """Over the whole corpus 'drug' is in 100 of 700 passages (14%) and would be kept; among the
+    100 the caller can see it is in all of them and must be left out."""
+    big_document(session, Q3D, "PRJ-001", 100, RARE)
+    add_document(session, Q3C, "PRJ-002", [f"Residual solvent passage {n}." for n in range(600)])
+    hits = search(session, "drug lead mercury arsenic", limit=200)
+    assert {h.page_start for h in hits} == {4, 8, 12}
+
+
+@needs_db
+def test_the_cut_off_is_fifteen_percent_of_the_visible_passages(session: Session) -> None:
+    extra = {n: "alpha." for n in range(18)}  # 18 of 120 = exactly 15%: kept
+    extra |= {n: "beta." for n in range(20, 39)}  # 19 of 120 = 15.8%: left out
+    extra |= {50: "w1.", 51: "w2.", 52: "w3."}
+    big_document(session, Q3D, "PRJ-001", 120, extra)
+    pages = {h.page_start for h in search(session, "alpha beta w1 w2 w3", limit=200)}
+    assert set(range(1, 19)) <= pages  # every 'alpha' passage
+    assert {51, 52, 53} <= pages
+    assert not pages & set(range(21, 40))  # no passage that only had 'beta'
+
+
+@needs_db
+def test_words_that_occur_in_no_visible_passage_find_nothing(session: Session) -> None:
+    big_document(session, Q3D, "PRJ-001", 120, RARE)
+    assert search(session, "zzzzqx qqqwxy pppzzv", limit=10) == []
+
+
+@needs_db
+def test_the_words_kept_when_few_survive_are_the_rarest_not_the_commonest(session: Session) -> None:
+    big_document(session, Q3D, "PRJ-001", 120, RARE)
+    # Three words are in every passage; only 'lead' is rare, so just one word survives the cut-off.
+    hits = search(session, "drug product describes lead", limit=200)
+    assert hits[0].page_start == 4  # 'lead' was kept alongside two common words, not dropped
+
+
+@needs_db
+def test_a_word_found_in_no_passage_does_not_count_towards_the_minimum(session: Session) -> None:
+    big_document(session, Q3D, "PRJ-001", 120, RARE)
+    # 'zzzzqx' is nowhere. Only lead and mercury survive, which is fewer than three usable words,
+    # so a common word is brought back (many passages match); if the unknown word were counted,
+    # three words would "survive" and only the two rare passages would come back.
+    hits = search(session, "drug lead mercury zzzzqx", limit=200)
+    assert len(hits) > 2

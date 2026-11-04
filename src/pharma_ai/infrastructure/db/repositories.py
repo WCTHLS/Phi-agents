@@ -46,6 +46,15 @@ def _newest_versions() -> Any:
 
 
 MAX_KEYWORD_TERMS = 32
+# Keyword search ignores a question word that appears in more than this share of the passages the
+# caller can see: "drug" or "products" says little, "M13A" or "solubility" says a lot. Measured on
+# the golden questions (ADR-009): 15% worked best; 10% and 20% were slightly worse.
+COMMON_WORD_SHARE = 0.15
+# But at least this many words are always kept (the rarest ones), so a question made only of
+# common words still searches.
+MIN_KEPT_TERMS = 3
+# With fewer visible passages than this, how common a word is means little, so every word is kept.
+MIN_PASSAGES_FOR_RARITY = 100
 
 
 def keyword_terms(text: str) -> list[str]:
@@ -382,6 +391,34 @@ class ChunkRepository:
             for chunk, version, source, dist in self._session.execute(stmt)
         ]
 
+    def _informative_terms(
+        self, terms: list[str], projects: list[str], embedding_model: str, latest_only: bool
+    ) -> list[str]:
+        """The question words worth searching for: those that are not in too many passages.
+
+        How common a word is is counted over the passages the caller can see (the same rules as
+        the search itself), never over the whole corpus, so a word's frequency cannot reveal
+        anything about documents the caller may not read. A word that occurs in no visible
+        passage is dropped. With few visible passages every word is kept (see
+        ``MIN_PASSAGES_FOR_RARITY``).
+        """
+        counts = [
+            func.count().filter(Chunk.search_vector.op("@@")(func.plainto_tsquery("english", term)))
+            for term in terms
+        ]
+        stmt = self._visible_chunks(projects, embedding_model, latest_only).with_only_columns(
+            func.count(), *counts, maintain_column_froms=True
+        )
+        total, *frequencies = self._session.execute(stmt).one()
+        if total < MIN_PASSAGES_FOR_RARITY:
+            return terms
+        present = [(term, n) for term, n in zip(terms, frequencies, strict=True) if n > 0]
+        kept = [term for term, n in present if n <= COMMON_WORD_SHARE * total]
+        if len(kept) < MIN_KEPT_TERMS:
+            rarest = sorted(present, key=lambda item: item[1])[:MIN_KEPT_TERMS]
+            kept = [term for term, _ in rarest]
+        return [term for term in terms if term in kept]  # keep the question's own order
+
     def search_keywords(
         self,
         query_text: str,
@@ -400,14 +437,18 @@ class ChunkRepository:
         (see ``_visible_chunks``), so it cannot return anything that search could not.
 
         PostgreSQL ranks by how many question words a chunk has and how close together they are,
-        but not by how rare a word is across the corpus, so a common word counts as much as a
-        rare one. The question is turned into plain words first, so nothing the user types can
-        act as search syntax.
+        but not by how rare a word is, so words that appear in many passages are left out first
+        (``_informative_terms``); otherwise a long question matches dozens of unrelated passages.
+        The question is turned into plain words first, so nothing the user types can act as
+        search syntax.
         """
         projects = list(allowed_project_ids)
         terms = keyword_terms(query_text)
         if not projects or not terms:
             return []
+        terms = self._informative_terms(terms, projects, embedding_model, latest_only)
+        if not terms:
+            return []  # none of the question's words occurs in any passage the caller can see
         query = func.websearch_to_tsquery("english", " or ".join(terms))
         rank: Any = func.ts_rank_cd(Chunk.search_vector, query, 1)
         stmt = (
