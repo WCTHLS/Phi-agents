@@ -10,7 +10,7 @@ Public documents for building and testing ingestion, chunking, retrieval and cit
 |---|---|
 | `data/sources/corpus_manifest.csv` | 22 documents, with licence status, reuse basis, attribution text, links and flags. The `tier` column says where each stands: 13 `core` (in the corpus), 2 `deferred` (`eligible=yes`, but no correct PDF yet) and 7 `hold` (`eligible=no`) |
 | `scripts/fetch_corpus.py` | Downloads the core PDFs, fingerprints them, checks the text layer, writes the register |
-| `evals/golden_questions.csv` | 16 draft test questions, each with a machine-checkable evidence spec |
+| `evals/golden_questions.csv` | 17 draft test questions, each with a machine-checkable evidence spec |
 | `evals/verify_questions.py` | Finds the evidence page for each question in the downloaded PDFs and flags questions that don't hold up |
 | `data/corpus/originals/<doc_id>.pdf` | Created by the script: versioned originals (never edit). Not committed |
 | `data/corpus/corpus_register.csv` | Created by the script: manifest plus sha256, size, pages, text layer, retrieval time. Not committed |
@@ -97,7 +97,7 @@ The Indian Pharmacopoeia (IP 2026) is also out: it is licensed content, and nobo
 
 ## Golden questions and review
 
-`evals/golden_questions.csv` holds 16 draft questions: table values, definitions, a code trap (Q3C vs Q3D), Indian rules, a version trap, a reasoning question and two gaps (where the right answer is "not covered by approved sources"). Nobody with domain knowledge has reviewed them, so each question moves through four levels:
+`evals/golden_questions.csv` holds 17 draft questions: table values, definitions, a code trap (Q3C vs Q3D), Indian rules, a version trap, a reasoning question and two gaps (where the right answer is "not covered by approved sources"). Nobody with domain knowledge has reviewed them, so each question moves through four levels:
 
 1. **Draft:** written from general knowledge, not from the documents. The `draft_answer_from_memory` column may contain errors and is never a source.
 2. **Machine-checked:** `evals/verify_questions.py` finds the page where the evidence appears and prints the passage. Questions it can't support (`NOT_FOUND`) must be fixed or dropped. For the gap questions it confirms the terms are absent from the corpus. Results go to `evals/golden_questions_checked.csv`, which Git ignores.
@@ -106,19 +106,29 @@ The Indian Pharmacopoeia (IP 2026) is also out: it is licensed content, and nobo
 
 The checker proves the passage exists and where. It cannot show whether the question matters to a scientist or whether the answer is scientifically right. The PRD's Phase 1 exit gate ("reviewed research background") needs that scientist review.
 
-### Machine check (26 Oct 2026, 13 documents in the corpus)
+### Machine check (re-run 3 Nov 2026, 13 documents in the corpus)
 
-11 of 16 questions pass.
+14 of 17 questions pass.
 
 | Result | Questions |
 |---|---|
-| OK (evidence page found) | GQ-01, 02, 04, 05, 07, 08, 09, 10, 14 |
+| OK (evidence page found) | GQ-01 to 10, GQ-14, GQ-17 (GQ-03 and GQ-06 were `NOT_FOUND` until they were corrected on 3 Nov; GQ-17 is new) |
 | OK for the two gap questions: terms not found in the 13 corpus documents | GQ-15, GQ-16. Valid for this corpus only; they must be re-checked if the deferred documents are added, because Schedule M or the NDCT Rules could mention the terms |
-| `NOT_FOUND`, GQ-03 | The FDA nitrosamine guidance is the right document (September 2024, Revision 2). NDMA and NDEA appear together only on page 10, and "ng/day" is not on that page, while "26.5" appears on pages 18 and 45. The question's pattern needs all three terms on one page, so the pattern needs fixing by its owner |
-| `NOT_FOUND`, GQ-06 | The 2018 FDA guidance (page 8) says the dissolution criterion is "Q=80% in 30 minutes"; the question's pattern and its draft answer say 85%. The question needs fixing by its owner |
 | `DOC_MISSING` | GQ-11 (needs the deferred `IN-SCHEDM-2023`), GQ-12, GQ-13 (need the deferred `IN-NDCT-2019`) |
 
-No question was marked `CHECK`. The questions have not been edited. The checker reads the question file, not the manifest. The three questions that depend on deferred documents cannot be answered or scored until the correct PDFs are saved, or the questions are changed or dropped by their owner.
+No question was marked `CHECK`.
+
+#### Changes to the questions on 3 Nov 2026
+
+Made by the backend developer after the retrieval check (`evals/retrieval_check.py`) showed that two questions could not be scored. No domain expert has reviewed them (decision D11); all three rows stay `draft` / `pending`.
+
+| Question | Change | Why |
+|---|---|---|
+| GQ-06 | Evidence pattern and draft answer corrected to "Q=80% in 30 minutes" | Page 8 of the 2018 FDA guidance says "the dissolution criterion is Q=80% in 30 minutes". The draft said 85%, which appears nowhere in the document. |
+| GQ-03 | Narrowed from "NDMA and NDEA" to NDMA (evidence: `NDMA` and `96 ng/day`, pages 43 and 44) | In this version of the guidance NDEA is named on only one page (10) and no page gives an NDEA-specific limit. The draft answer's "NDEA 26.5 ng/day" cannot be confirmed from this document (UNVERIFIED): 26.5 ng/day appears on page 18 as the value to use when a limit cannot be determined, and on page 45 in an example table. |
+| GQ-17 (new) | "What limit does FDA recommend if a nitrosamine's own limit cannot be determined?" (evidence: `26.5 ng/day` and `cannot be determined`, page 18) | Keeps the fallback value as a question of its own. |
+
+Retrieval results quoted in ADR-008 and ADR-009 before this date used the original questions (9 scoreable); they now use the corrected set (12 scoreable). The checker reads the question file, not the manifest. The three questions that depend on deferred documents cannot be answered or scored until the correct PDFs are saved, or the questions are changed or dropped by their owner.
 
 ## Built-in test cases
 

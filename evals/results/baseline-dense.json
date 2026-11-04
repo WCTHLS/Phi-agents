@@ -10,11 +10,8 @@
     "chunk_overlap": 100
   },
   "summary": {
-    "scored": 9,
-    "unscoreable": [
-      "GQ-03",
-      "GQ-06"
-    ],
+    "scored": 12,
+    "unscoreable": [],
     "skipped": [
       "GQ-11",
       "GQ-12",
@@ -23,14 +20,14 @@
       "GQ-16"
     ],
     "passage": {
-      "1": 5,
-      "3": 6,
-      "5": 6
+      "1": 7,
+      "3": 9,
+      "5": 9
     },
     "document": {
-      "1": 7,
-      "3": 8,
-      "5": 8
+      "1": 10,
+      "3": 11,
+      "5": 11
     }
   },
   "questions": {
@@ -65,11 +62,19 @@
       "best": "ICH-Q3CR9 p11-11 d=0.193"
     },
     "GQ-03": {
-      "status": "unscoreable",
-      "reason": "the question's own patterns match no page in FDA-NITRO-2024",
-      "passage": {},
-      "document": {},
-      "best": ""
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-NITRO-2024 p43-43 d=0.211"
     },
     "GQ-04": {
       "status": "scored",
@@ -102,11 +107,19 @@
       "best": "ICH-M9 p5-6 d=0.207"
     },
     "GQ-06": {
-      "status": "unscoreable",
-      "reason": "the question's own patterns match no page in FDA-DISS-HS-2018",
-      "passage": {},
-      "document": {},
-      "best": ""
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-DISS-HS-2018 p8-8 d=0.119"
     },
     "GQ-07": {
       "status": "scored",
@@ -217,6 +230,21 @@
       "passage": {},
       "document": {},
       "best": ""
+    },
+    "GQ-17": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-NITRO-2024 p37-37 d=0.164"
     }
   }
 }

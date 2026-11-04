@@ -9,20 +9,20 @@
   - **Merging** (`features/research/search.py`): each search returns its top 20; a passage earns `1 / (60 + rank)` from each list it is in; passages are ordered by the total, ties going to the one that ranked higher in either list. Every result records its vector rank and keyword rank, so it can be explained and audited. The constants (20, 60) are the usual defaults, not tuned.
   - **Interfaces.** `hybrid_search(...)` merges for an already-embedded question; `PassageSearch.search(question, project_ids)` embeds the question with the model and returns citable passages. Neither embeds when there is nothing to search for or nowhere the caller may look.
   - **Measured the same way as before.** `evals/retrieval_check.py --retriever dense|keyword|hybrid` scores each against the golden questions, and the results are saved in `evals/results/`.
-- **Measured on 3 Nov 2026** (13-document corpus; 9 scoreable golden questions; right passage = a returned passage from the expected document whose pages include an evidence page):
+- **Measured on 3 Nov 2026** (13-document corpus, on the developer's own database; the 12 scoreable of the 17 golden questions after the corrections described in `data/sources/CORPUS.md`; right passage = a returned passage from the expected document whose pages include an evidence page):
 
   | Search | Passage, top 1 | Top 3 | Top 5 | Document, top 3 |
   |---|---|---|---|---|
-  | Meaning only | 5 of 9 | 6 | 6 | 8 |
-  | Keywords only | 3 of 9 | 7 | 7 | 8 |
-  | **Hybrid** | **6 of 9** | 7 | 7 | **9** |
+  | Meaning only | 7 of 12 | 9 | 9 | 11 |
+  | Keywords only | 4 of 12 | 9 | 9 | 11 |
+  | **Hybrid** | **8 of 12** | 9 | 9 | **12** |
 
-  Hybrid lost no question that meaning-only got right, gained GQ-09 (a question that needs two documents) at the top 5 and GQ-10 at rank 1. **That is two questions out of nine: a direction, not proof.** It says nothing about whether answers are scientifically right (decision D11).
+  Hybrid is better at rank 1 and for the right document, and the same at the top 5. **It is not better everywhere.** On GQ-06 (the corrected dissolution question) meaning-only search puts the right page first, but the keyword list is full of other dissolution passages, and passages that appear in both lists outrank one that appears in a single list, so hybrid drops the right page out of the top results; hybrid gains GQ-17 and GQ-10 at rank 1 and GQ-09 at the top 3. Giving the keyword list a smaller weight (1.0 down to 0.25) changed no result on either question set, so the cause is the shape of the keyword list (long natural-language questions give many weak matches), not the weighting. On the earlier 9-question set, before the two broken questions were fixed, the figures were meaning-only 5 / 6 (rank 1 / top 5), keywords 3 / 7, hybrid 6 / 7. These are small differences on a small set: a direction, not proof, and nothing here says whether answers are scientifically right (decision D11).
 - **Limits, not hidden:**
   - **PostgreSQL has no true BM25.** `ts_rank_cd` rewards more matching words close together, but not rare words over common ones, so "oral" counts as much as "M13A". If the numbers show it matters, the next step is to weight words by how rare they are across the corpus.
   - **A question that names a document is not handled.** Chunking removes running headers (ADR-008), so a passage no longer contains its own document's name, and GQ-07 ("under ICH M13A") still finds FDA's 2022 guidance first. The plan is to match document codes and titles in the question against the source register and boost or filter to those documents.
   - **Stemming is English only**, and tables are still flattened text (ADR-008).
-  - **Two golden questions remain misses:** GQ-01 (a valid passage on a different page from the one the check accepts) and GQ-07 (above).
+  - **Misses at the top 5 for hybrid:** GQ-01 (a valid passage on a different page from the one the check accepts), GQ-06 (above) and GQ-07 (above).
   - **The access list is an argument.** The search enforces the project IDs it is given. The endpoint that calls it must take them from the signed-in user's token, never from the request, and no endpoint does yet; `/research/query` still answers from built-in samples (S2-09 connects them).
 - **Not done here:** a reranker (deferred in the sprint scope); the named-document step; an audited search endpoint and its HTTP-level permission tests (S2-12); an "indexed" flag on the document list for the library UI.
 - **Revisit when:** the golden set grows enough to separate close options; a reranker or named-document step is added; the chunking or the embedding model changes (run `scripts/index_chunks.py --force`; keyword search needs no re-indexing); or a second language needs different stemming.

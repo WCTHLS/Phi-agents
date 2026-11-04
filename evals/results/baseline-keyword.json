@@ -10,11 +10,8 @@
     "chunk_overlap": 100
   },
   "summary": {
-    "scored": 9,
-    "unscoreable": [
-      "GQ-03",
-      "GQ-06"
-    ],
+    "scored": 12,
+    "unscoreable": [],
     "skipped": [
       "GQ-11",
       "GQ-12",
@@ -23,14 +20,14 @@
       "GQ-16"
     ],
     "passage": {
-      "1": 3,
-      "3": 7,
-      "5": 7
+      "1": 4,
+      "3": 9,
+      "5": 9
     },
     "document": {
-      "1": 6,
-      "3": 8,
-      "5": 8
+      "1": 8,
+      "3": 11,
+      "5": 11
     }
   },
   "questions": {
@@ -65,11 +62,19 @@
       "best": "ICH-Q3CR9 p10-11 kw=0.486"
     },
     "GQ-03": {
-      "status": "unscoreable",
-      "reason": "the question's own patterns match no page in FDA-NITRO-2024",
-      "passage": {},
-      "document": {},
-      "best": ""
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-NITRO-2024 p18-18 kw=0.535"
     },
     "GQ-04": {
       "status": "scored",
@@ -102,11 +107,19 @@
       "best": "ICH-M7R2 p27-28 kw=0.866"
     },
     "GQ-06": {
-      "status": "unscoreable",
-      "reason": "the question's own patterns match no page in FDA-DISS-HS-2018",
-      "passage": {},
-      "document": {},
-      "best": ""
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": false,
+        "5": false
+      },
+      "document": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-M7R2 p27-28 kw=1.007"
     },
     "GQ-07": {
       "status": "scored",
@@ -217,6 +230,21 @@
       "passage": {},
       "document": {},
       "best": ""
+    },
+    "GQ-17": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-NITRO-2024 p18-18 kw=1.052"
     }
   }
 }
