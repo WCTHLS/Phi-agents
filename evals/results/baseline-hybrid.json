@@ -1,0 +1,222 @@
+{
+  "settings": {
+    "model": "BAAI/bge-small-en-v1.5",
+    "retriever": "hybrid",
+    "projects": [
+      "PRJ-001"
+    ],
+    "query_prefix": "",
+    "chunk_size": 500,
+    "chunk_overlap": 100
+  },
+  "summary": {
+    "scored": 9,
+    "unscoreable": [
+      "GQ-03",
+      "GQ-06"
+    ],
+    "skipped": [
+      "GQ-11",
+      "GQ-12",
+      "GQ-13",
+      "GQ-15",
+      "GQ-16"
+    ],
+    "passage": {
+      "1": 6,
+      "3": 7,
+      "5": 7
+    },
+    "document": {
+      "1": 7,
+      "3": 9,
+      "5": 9
+    }
+  },
+  "questions": {
+    "GQ-01": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": false,
+        "5": false
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-Q3DR2 p46-46 d=0.179 kw=0.897"
+    },
+    "GQ-02": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-Q3CR9 p10-11 d=0.226 kw=0.486"
+    },
+    "GQ-03": {
+      "status": "unscoreable",
+      "reason": "the question's own patterns match no page in FDA-NITRO-2024",
+      "passage": {},
+      "document": {},
+      "best": ""
+    },
+    "GQ-04": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-M7R2 p6-7 d=0.163 kw=0.455"
+    },
+    "GQ-05": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-M9 p5-6 d=0.207 kw=0.655"
+    },
+    "GQ-06": {
+      "status": "unscoreable",
+      "reason": "the question's own patterns match no page in FDA-DISS-HS-2018",
+      "passage": {},
+      "document": {},
+      "best": ""
+    },
+    "GQ-07": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": false,
+        "5": false
+      },
+      "document": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-BA-2022 p30-30 d=0.171 kw=0.428"
+    },
+    "GQ-08": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-ANDA-STAB-2014 p6-7 d=0.185 kw=0.380"
+    },
+    "GQ-09": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-Q3DR2 p5-5 d=0.210 kw=0.531"
+    },
+    "GQ-10": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-NITRO-2024 p19-19 d=0.106 kw=0.998"
+    },
+    "GQ-11": {
+      "status": "skipped",
+      "reason": "not ingested: IN-SCHEDM-2023",
+      "passage": {},
+      "document": {},
+      "best": ""
+    },
+    "GQ-12": {
+      "status": "skipped",
+      "reason": "not ingested: IN-NDCT-2019",
+      "passage": {},
+      "document": {},
+      "best": ""
+    },
+    "GQ-13": {
+      "status": "skipped",
+      "reason": "not ingested: IN-NDCT-2019",
+      "passage": {},
+      "document": {},
+      "best": ""
+    },
+    "GQ-14": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-PV-2011 p7-8 d=0.162 kw=0.859"
+    },
+    "GQ-15": {
+      "status": "skipped",
+      "reason": "gap question: the right answer is 'not covered'",
+      "passage": {},
+      "document": {},
+      "best": ""
+    },
+    "GQ-16": {
+      "status": "skipped",
+      "reason": "gap question: the right answer is 'not covered'",
+      "passage": {},
+      "document": {},
+      "best": ""
+    }
+  }
+}

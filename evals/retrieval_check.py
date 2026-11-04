@@ -49,6 +49,7 @@ from sqlalchemy.orm import Session
 from verify_questions import norm, parse_spec
 
 from pharma_ai.core.config import settings
+from pharma_ai.features.research.search import hybrid_search
 from pharma_ai.infrastructure.db.models import Document, DocumentVersion
 from pharma_ai.infrastructure.db.repositories import ChunkHit, ChunkRepository
 from pharma_ai.infrastructure.db.session import make_engine, make_session_factory
@@ -92,7 +93,41 @@ def dense(
     )
 
 
-RETRIEVERS: dict[str, Retriever] = {"dense": dense}
+def keyword(
+    session: Session,
+    *,
+    question: str,
+    vector: Sequence[float],
+    projects: Sequence[str],
+    limit: int,
+    model_name: str,
+) -> list[ChunkHit]:
+    return ChunkRepository(session).search_keywords(
+        question, projects, embedding_model=model_name, limit=limit
+    )
+
+
+def hybrid(
+    session: Session,
+    *,
+    question: str,
+    vector: Sequence[float],
+    projects: Sequence[str],
+    limit: int,
+    model_name: str,
+) -> list[ChunkHit]:
+    fused = hybrid_search(
+        session,
+        question=question,
+        vector=vector,
+        projects=projects,
+        embedding_model=model_name,
+        limit=limit,
+    )
+    return [f.hit for f in fused]
+
+
+RETRIEVERS: dict[str, Retriever] = {"dense": dense, "keyword": keyword, "hybrid": hybrid}
 
 
 @dataclass(frozen=True)
@@ -168,7 +203,13 @@ def score(
 def describe(hit: ChunkHit | None) -> str:
     if hit is None:
         return "(no result)"
-    return f"{hit.source_id} p{hit.page_start}-{hit.page_end} d={hit.distance:.3f}"
+    where = f"{hit.source_id} p{hit.page_start}-{hit.page_end}"
+    scores = []
+    if hit.distance is not None:
+        scores.append(f"d={hit.distance:.3f}")
+    if hit.keyword_score is not None:
+        scores.append(f"kw={hit.keyword_score:.3f}")
+    return f"{where} {' '.join(scores)}" if scores else where
 
 
 def load_pages(

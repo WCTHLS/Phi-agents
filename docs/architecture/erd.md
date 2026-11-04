@@ -106,7 +106,7 @@ erDiagram
 | Audit records cannot be altered | PRD FR-30, NFR-07 | Triggers refuse UPDATE, DELETE and TRUNCATE on `audit_events`. |
 | Audit outcomes are a fixed set | S1-11 | Check: `outcome` is SUCCESS, DENIED or FAILURE. |
 | Audit records are written by the server | S1-11, ADR-005 | The API records events from the verified login token; there is no endpoint for a client to write one. |
-| Retrieval is limited to the caller's projects | PRD FR-10, NFR-06 | `ChunkRepository.search_nearest` applies the project filter and the eligibility check in the same SQL statement as the vector search. No allowed projects means no results. It also compares only chunks made by the named embedding model and, by default, only the newest version of each document. |
+| Retrieval is limited to the caller's projects | PRD FR-10, NFR-06 | `ChunkRepository.search_nearest` applies the project filter and the eligibility check in the same SQL statement as the vector search. No allowed projects means no results. It also compares only chunks made by the named embedding model and, by default, only the newest version of each document.. Keyword search (`search_keywords`, `chunks.search_vector`, migration 0004) follows the same rules. |
 
 ## Limits to know about
 
