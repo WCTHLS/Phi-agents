@@ -33,6 +33,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Computed,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -44,12 +45,17 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Embedding size. Matches ADR-003 (BAAI/bge-small-en-v1.5, 384 dimensions). Changing the model
 # to one with a different size needs a new column or a re-embed migration.
 EMBEDDING_DIM = 384
+
+# How the searchable words of a chunk are made for keyword search (migration 0004). The database
+# keeps this up to date itself whenever a chunk is written. The section heading is searchable too.
+# 'english' reduces words to their stems, so "limits" and "limit" match.
+CHUNK_SEARCH_EXPRESSION = "to_tsvector('english', coalesce(section, '') || ' ' || text)"
 
 # SHA-256 of an empty input. A stored original with this fingerprint means the file was empty or
 # the hash was never computed, so the database refuses it.
@@ -281,6 +287,10 @@ class Chunk(Base):
     # Empty until the embedding step has run. embedding and embedding_model are set together.
     embedding: Mapped[Any | None] = mapped_column(Vector(EMBEDDING_DIM))
     embedding_model: Mapped[str | None] = mapped_column(String(128))
+    # The words of the chunk for keyword search. Computed by the database from section and text.
+    search_vector: Mapped[Any] = mapped_column(
+        TSVECTOR, Computed(CHUNK_SEARCH_EXPRESSION, persisted=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_NOW)
 
     __table_args__ = (
@@ -299,6 +309,8 @@ class Chunk(Base):
             name="char_range",
         ),
         Index("ix_chunks_version_id", "version_id"),
+        # Fast keyword search over the generated column (migration 0004).
+        Index("ix_chunks_search_vector", "search_vector", postgresql_using="gin"),
         # Fast nearest-neighbour search using cosine distance (HNSW is an approximate index).
         Index(
             "ix_chunks_embedding_hnsw",

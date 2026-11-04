@@ -9,6 +9,7 @@ The repositories do not commit. The caller owns the transaction (``session.commi
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -42,6 +43,23 @@ def _newest_versions() -> Any:
         .group_by(DocumentVersion.document_id)
         .subquery()
     )
+
+
+MAX_KEYWORD_TERMS = 32
+
+
+def keyword_terms(text: str) -> list[str]:
+    """The plain words of a question, for keyword search.
+
+    Only letters and digits survive, lower-cased, without repeats and without single characters,
+    so nothing typed into a question can act as search syntax, and an over-long question cannot
+    make an over-long query. ("or" is dropped because the search joins the words with "or".)
+    """
+    seen: dict[str, None] = {}
+    for word in re.findall(r"[A-Za-z0-9]+", text.lower()):
+        if len(word) > 1 and word != "or":
+            seen.setdefault(word)
+    return list(seen)[:MAX_KEYWORD_TERMS]
 
 
 class ProjectRepository:
@@ -223,7 +241,11 @@ class ChunkHit:
     section: str | None
     text: str
     attribution: str | None
-    distance: float  # cosine distance: 0 = same direction, larger = less similar
+    # Set by the vector search: cosine distance, 0 = same direction, larger = less similar.
+    distance: float | None = None
+    # Set by the keyword search: how well the words match (higher is better; only comparable
+    # within one search).
+    keyword_score: float | None = None
 
 
 class ChunkRepository:
@@ -257,6 +279,71 @@ class ChunkRepository:
         self._session.flush()
         return len(rows)
 
+    def _visible_chunks(
+        self,
+        projects: list[str],
+        embedding_model: str,
+        latest_only: bool,
+        *extra_columns: Any,
+    ) -> Any:
+        """The chunks a caller may search, as one SQL statement that the searches build on.
+
+        Every rule that decides what the caller may see is here, so the vector search and the
+        keyword search cannot disagree: the caller's projects, an eligible source, a chunk that
+        has been embedded by the named model, and (by default) the newest version of the document.
+        """
+        has_access = exists().where(
+            ProjectDocument.document_id == Document.document_id,
+            ProjectDocument.project_id.in_(projects),
+        )
+        stmt = (
+            select(Chunk, DocumentVersion, Source, *extra_columns)
+            .join(DocumentVersion, DocumentVersion.version_id == Chunk.version_id)
+            .join(Document, Document.document_id == DocumentVersion.document_id)
+            .join(Source, Source.source_id == Document.source_id)
+            .where(
+                Chunk.embedding.is_not(None),
+                Chunk.embedding_model == embedding_model,
+                Source.eligible.is_(True),
+                has_access,
+            )
+        )
+        if latest_only:
+            newest = _newest_versions()
+            stmt = stmt.join(
+                newest,
+                and_(
+                    newest.c.document_id == DocumentVersion.document_id,
+                    newest.c.version_number == DocumentVersion.version_number,
+                ),
+            )
+        return stmt
+
+    @staticmethod
+    def _hit(
+        chunk: Chunk,
+        version: DocumentVersion,
+        source: Source,
+        *,
+        distance: float | None = None,
+        keyword_score: float | None = None,
+    ) -> ChunkHit:
+        return ChunkHit(
+            chunk_id=chunk.chunk_id,
+            source_id=source.source_id,
+            version_id=version.version_id,
+            version_label=version.version_label,
+            version_number=version.version_number,
+            sha256=version.sha256,
+            page_start=chunk.page_start,
+            page_end=chunk.page_end,
+            section=chunk.section,
+            text=chunk.text,
+            attribution=source.attribution,
+            distance=distance,
+            keyword_score=keyword_score,
+        )
+
     def search_nearest(
         self,
         query_embedding: Sequence[float],
@@ -285,49 +372,51 @@ class ChunkRepository:
                 f"query embedding has {len(query_embedding)} values, expected {EMBEDDING_DIM}"
             )
         distance: Any = Chunk.embedding.cosine_distance(list(query_embedding))
-        has_access = exists().where(
-            ProjectDocument.document_id == Document.document_id,
-            ProjectDocument.project_id.in_(projects),
-        )
         stmt = (
-            select(Chunk, DocumentVersion, Source, distance.label("distance"))
-            .join(DocumentVersion, DocumentVersion.version_id == Chunk.version_id)
-            .join(Document, Document.document_id == DocumentVersion.document_id)
-            .join(Source, Source.source_id == Document.source_id)
-            .where(
-                Chunk.embedding.is_not(None),
-                Chunk.embedding_model == embedding_model,
-                Source.eligible.is_(True),
-                has_access,
-            )
-            .order_by(distance)
+            self._visible_chunks(projects, embedding_model, latest_only, distance.label("distance"))
+            .order_by(distance, Chunk.chunk_id)
             .limit(limit)
         )
-        if latest_only:
-            newest = _newest_versions()
-            stmt = stmt.join(
-                newest,
-                and_(
-                    newest.c.document_id == DocumentVersion.document_id,
-                    newest.c.version_number == DocumentVersion.version_number,
-                ),
-            )
-        hits = []
-        for chunk, version, source, dist in self._session.execute(stmt):
-            hits.append(
-                ChunkHit(
-                    chunk_id=chunk.chunk_id,
-                    source_id=source.source_id,
-                    version_id=version.version_id,
-                    version_label=version.version_label,
-                    version_number=version.version_number,
-                    sha256=version.sha256,
-                    page_start=chunk.page_start,
-                    page_end=chunk.page_end,
-                    section=chunk.section,
-                    text=chunk.text,
-                    attribution=source.attribution,
-                    distance=float(dist),
-                )
-            )
-        return hits
+        return [
+            self._hit(chunk, version, source, distance=float(dist))
+            for chunk, version, source, dist in self._session.execute(stmt)
+        ]
+
+    def search_keywords(
+        self,
+        query_text: str,
+        allowed_project_ids: Iterable[str],
+        *,
+        embedding_model: str,
+        limit: int = 5,
+        latest_only: bool = True,
+    ) -> list[ChunkHit]:
+        """Return the chunks whose words best match the question's words.
+
+        Plain language: this finds exact terms (a guideline code such as "M13A", a substance
+        name) that search by meaning can miss. A chunk matches if it has *any* of the question's
+        words (after stemming, so "limits" matches "limit"), and chunks with more of them, close
+        together, rank higher. It follows exactly the same visibility rules as ``search_nearest``
+        (see ``_visible_chunks``), so it cannot return anything that search could not.
+
+        PostgreSQL ranks by how many question words a chunk has and how close together they are,
+        but not by how rare a word is across the corpus, so a common word counts as much as a
+        rare one. The question is turned into plain words first, so nothing the user types can
+        act as search syntax.
+        """
+        projects = list(allowed_project_ids)
+        terms = keyword_terms(query_text)
+        if not projects or not terms:
+            return []
+        query = func.websearch_to_tsquery("english", " or ".join(terms))
+        rank: Any = func.ts_rank_cd(Chunk.search_vector, query, 1)
+        stmt = (
+            self._visible_chunks(projects, embedding_model, latest_only, rank.label("rank"))
+            .where(Chunk.search_vector.op("@@")(query))
+            .order_by(rank.desc(), Document.source_id, Chunk.chunk_index)
+            .limit(limit)
+        )
+        return [
+            self._hit(chunk, version, source, keyword_score=float(score))
+            for chunk, version, source, score in self._session.execute(stmt)
+        ]
