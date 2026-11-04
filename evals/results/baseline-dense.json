@@ -10,7 +10,7 @@
     "chunk_overlap": 100
   },
   "summary": {
-    "scored": 12,
+    "scored": 28,
     "unscoreable": [],
     "skipped": [
       "GQ-11",
@@ -20,14 +20,14 @@
       "GQ-16"
     ],
     "passage": {
-      "1": 7,
-      "3": 9,
-      "5": 9
+      "1": 19,
+      "3": 24,
+      "5": 24
     },
     "document": {
-      "1": 10,
-      "3": 11,
-      "5": 11
+      "1": 26,
+      "3": 27,
+      "5": 27
     }
   },
   "questions": {
@@ -245,6 +245,246 @@
         "5": true
       },
       "best": "FDA-NITRO-2024 p37-37 d=0.164"
+    },
+    "GQ-18": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-M13A p7-8 d=0.143"
+    },
+    "GQ-19": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-M13A p19-20 d=0.184"
+    },
+    "GQ-20": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-DISS-1997 p15-16 d=0.161"
+    },
+    "GQ-21": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-M7R2 p13-14 d=0.144"
+    },
+    "GQ-22": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-M9 p13-13 d=0.211"
+    },
+    "GQ-23": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-SIZE-2022 p6-6 d=0.167"
+    },
+    "GQ-24": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-PV-2011 p18-19 d=0.208"
+    },
+    "GQ-25": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-PV-2011 p18-19 d=0.216"
+    },
+    "GQ-26": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-ANDA-STAB-2014 p12-13 d=0.206"
+    },
+    "GQ-27": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-BA-2022 p24-24 d=0.153"
+    },
+    "GQ-28": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-Q9R1 p21-22 d=0.105"
+    },
+    "GQ-29": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-Q3CR9 p45-46 d=0.193"
+    },
+    "GQ-30": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-NITRO-2024 p8-9 d=0.164"
+    },
+    "GQ-31": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-Q3DR2 p15-16 d=0.205"
+    },
+    "GQ-32": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": false,
+        "5": false
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-Q9R1 p3-3 d=0.176"
+    },
+    "GQ-33": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-DISS-HS-2018 p8-8 d=0.141"
     }
   }
 }

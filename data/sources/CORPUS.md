@@ -10,7 +10,7 @@ Public documents for building and testing ingestion, chunking, retrieval and cit
 |---|---|
 | `data/sources/corpus_manifest.csv` | 22 documents, with licence status, reuse basis, attribution text, links and flags. The `tier` column says where each stands: 13 `core` (in the corpus), 2 `deferred` (`eligible=yes`, but no correct PDF yet) and 7 `hold` (`eligible=no`) |
 | `scripts/fetch_corpus.py` | Downloads the core PDFs, fingerprints them, checks the text layer, writes the register |
-| `evals/golden_questions.csv` | 17 draft test questions, each with a machine-checkable evidence spec |
+| `evals/golden_questions.csv` | 33 draft test questions, each with a machine-checkable evidence spec |
 | `evals/verify_questions.py` | Finds the evidence page for each question in the downloaded PDFs and flags questions that don't hold up |
 | `data/corpus/originals/<doc_id>.pdf` | Created by the script: versioned originals (never edit). Not committed |
 | `data/corpus/corpus_register.csv` | Created by the script: manifest plus sha256, size, pages, text layer, retrieval time. Not committed |
@@ -97,7 +97,7 @@ The Indian Pharmacopoeia (IP 2026) is also out: it is licensed content, and nobo
 
 ## Golden questions and review
 
-`evals/golden_questions.csv` holds 17 draft questions: table values, definitions, a code trap (Q3C vs Q3D), Indian rules, a version trap, a reasoning question and two gaps (where the right answer is "not covered by approved sources"). Nobody with domain knowledge has reviewed them, so each question moves through four levels:
+`evals/golden_questions.csv` holds 33 draft questions: table values, definitions, a code trap (Q3C vs Q3D), Indian rules, a version trap, a reasoning question and two gaps (where the right answer is "not covered by approved sources"). Nobody with domain knowledge has reviewed them, so each question moves through four levels:
 
 1. **Draft:** written from general knowledge, not from the documents. The `draft_answer_from_memory` column may contain errors and is never a source.
 2. **Machine-checked:** `evals/verify_questions.py` finds the page where the evidence appears and prints the passage. Questions it can't support (`NOT_FOUND`) must be fixed or dropped. For the gap questions it confirms the terms are absent from the corpus. Results go to `evals/golden_questions_checked.csv`, which Git ignores.
@@ -108,11 +108,11 @@ The checker proves the passage exists and where. It cannot show whether the ques
 
 ### Machine check (re-run 3 Nov 2026, 13 documents in the corpus)
 
-14 of 17 questions pass.
+30 of 33 questions pass.
 
 | Result | Questions |
 |---|---|
-| OK (evidence page found) | GQ-01 to 10, GQ-14, GQ-17 (GQ-03 and GQ-06 were `NOT_FOUND` until they were corrected on 3 Nov; GQ-17 is new) |
+| OK (evidence page found) | GQ-01 to 10, GQ-14, GQ-17 to GQ-33 (GQ-03 and GQ-06 were `NOT_FOUND` until they were corrected on 3 Nov; GQ-17 to GQ-33 were added that day) |
 | OK for the two gap questions: terms not found in the 13 corpus documents | GQ-15, GQ-16. Valid for this corpus only; they must be re-checked if the deferred documents are added, because Schedule M or the NDCT Rules could mention the terms |
 | `DOC_MISSING` | GQ-11 (needs the deferred `IN-SCHEDM-2023`), GQ-12, GQ-13 (need the deferred `IN-NDCT-2019`) |
 
@@ -128,7 +128,9 @@ Made by the backend developer after the retrieval check (`evals/retrieval_check.
 | GQ-03 | Narrowed from "NDMA and NDEA" to NDMA (evidence: `NDMA` and `96 ng/day`, pages 43 and 44) | In this version of the guidance NDEA is named on only one page (10) and no page gives an NDEA-specific limit. The draft answer's "NDEA 26.5 ng/day" cannot be confirmed from this document (UNVERIFIED): 26.5 ng/day appears on page 18 as the value to use when a limit cannot be determined, and on page 45 in an example table. |
 | GQ-17 (new) | "What limit does FDA recommend if a nitrosamine's own limit cannot be determined?" (evidence: `26.5 ng/day` and `cannot be determined`, page 18) | Keeps the fallback value as a question of its own. |
 
-Retrieval results quoted in ADR-008 and ADR-009 before this date used the original questions (9 scoreable); they now use the corrected set (12 scoreable). The checker reads the question file, not the manifest. The three questions that depend on deferred documents cannot be answered or scored until the correct PDFs are saved, or the questions are changed or dropped by their owner.
+GQ-18 to GQ-33 were added afterwards as a held-out test: 16 questions written from passages read in the corpus (one or two sentences each, worded as a scientist might ask them, not copied from the text), each with an evidence pattern that the checker matches to a real page. They exist so that a search setting chosen on the first 17 questions can be tested on questions it has never seen (ADR-009). Like the others they are `draft` / `pending`: machine-checked, not reviewed by a domain expert (D11), and their "answer" column is a short paraphrase of the cited page, not a source.
+
+Retrieval results quoted in ADR-008 and ADR-009 before this date used the original questions (9 scoreable); they now use the full set (28 scoreable). The checker reads the question file, not the manifest. The three questions that depend on deferred documents cannot be answered or scored until the correct PDFs are saved, or the questions are changed or dropped by their owner.
 
 ## Built-in test cases
 

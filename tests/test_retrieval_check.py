@@ -113,7 +113,7 @@ def test_pages_match_only_when_every_pattern_is_on_the_page() -> None:
 
 def test_the_real_golden_questions_load() -> None:
     questions = script.load_questions(script.DEFAULT_QUESTIONS)
-    assert len(questions) == 17
+    assert len(questions) == 33
     assert any(q.kind == "gap" for q in questions)
     assert all(q.spec for q in questions)
 

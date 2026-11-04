@@ -10,7 +10,7 @@
     "chunk_overlap": 100
   },
   "summary": {
-    "scored": 12,
+    "scored": 28,
     "unscoreable": [],
     "skipped": [
       "GQ-11",
@@ -20,14 +20,14 @@
       "GQ-16"
     ],
     "passage": {
-      "1": 4,
-      "3": 9,
-      "5": 9
+      "1": 13,
+      "3": 20,
+      "5": 23
     },
     "document": {
-      "1": 8,
-      "3": 11,
-      "5": 11
+      "1": 22,
+      "3": 24,
+      "5": 27
     }
   },
   "questions": {
@@ -44,7 +44,7 @@
         "3": true,
         "5": true
       },
-      "best": "ICH-Q3DR2 p46-46 kw=0.897"
+      "best": "ICH-Q3DR2 p46-46 kw=0.366"
     },
     "GQ-02": {
       "status": "scored",
@@ -66,21 +66,21 @@
       "reason": "",
       "passage": {
         "1": false,
-        "3": true,
-        "5": true
+        "3": false,
+        "5": false
       },
       "document": {
-        "1": true,
-        "3": true,
-        "5": true
+        "1": false,
+        "3": false,
+        "5": false
       },
-      "best": "FDA-NITRO-2024 p18-18 kw=0.535"
+      "best": "ICH-M7R2 p12-13 kw=0.191"
     },
     "GQ-04": {
       "status": "scored",
       "reason": "",
       "passage": {
-        "1": false,
+        "1": true,
         "3": true,
         "5": true
       },
@@ -89,22 +89,22 @@
         "3": true,
         "5": true
       },
-      "best": "ICH-M7R2 p1-2 kw=0.505"
+      "best": "ICH-M7R2 p6-6 kw=0.387"
     },
     "GQ-05": {
       "status": "scored",
       "reason": "",
       "passage": {
-        "1": false,
+        "1": true,
         "3": true,
         "5": true
       },
       "document": {
-        "1": false,
+        "1": true,
         "3": true,
         "5": true
       },
-      "best": "ICH-M7R2 p27-28 kw=0.866"
+      "best": "ICH-M9 p5-6 kw=0.374"
     },
     "GQ-06": {
       "status": "scored",
@@ -119,7 +119,7 @@
         "3": true,
         "5": true
       },
-      "best": "ICH-M7R2 p27-28 kw=1.007"
+      "best": "FDA-DISS-1997 p7-8 kw=0.367"
     },
     "GQ-07": {
       "status": "scored",
@@ -127,20 +127,20 @@
       "passage": {
         "1": false,
         "3": false,
-        "5": false
+        "5": true
       },
       "document": {
         "1": false,
         "3": false,
-        "5": false
+        "5": true
       },
-      "best": "FDA-BA-2022 p30-30 kw=0.428"
+      "best": "FDA-BA-2022 p30-30 kw=0.404"
     },
     "GQ-08": {
       "status": "scored",
       "reason": "",
       "passage": {
-        "1": false,
+        "1": true,
         "3": true,
         "5": true
       },
@@ -149,7 +149,7 @@
         "3": true,
         "5": true
       },
-      "best": "FDA-ANDA-STAB-2014 p5-6 kw=0.386"
+      "best": "FDA-ANDA-STAB-2014 p6-7 kw=0.344"
     },
     "GQ-09": {
       "status": "scored",
@@ -164,13 +164,13 @@
         "3": true,
         "5": true
       },
-      "best": "ICH-Q3DR2 p10-11 kw=0.672"
+      "best": "ICH-Q3CR9 p7-7 kw=0.475"
     },
     "GQ-10": {
       "status": "scored",
       "reason": "",
       "passage": {
-        "1": true,
+        "1": false,
         "3": true,
         "5": true
       },
@@ -179,7 +179,7 @@
         "3": true,
         "5": true
       },
-      "best": "FDA-NITRO-2024 p28-29 kw=1.077"
+      "best": "FDA-NITRO-2024 p45-45 kw=0.392"
     },
     "GQ-11": {
       "status": "skipped",
@@ -215,7 +215,7 @@
         "3": true,
         "5": true
       },
-      "best": "FDA-PV-2011 p7-8 kw=0.859"
+      "best": "FDA-PV-2011 p7-8 kw=0.286"
     },
     "GQ-15": {
       "status": "skipped",
@@ -235,6 +235,21 @@
       "status": "scored",
       "reason": "",
       "passage": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-NITRO-2024 p45-45 kw=0.448"
+    },
+    "GQ-18": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
         "1": true,
         "3": true,
         "5": true
@@ -244,7 +259,232 @@
         "3": true,
         "5": true
       },
-      "best": "FDA-NITRO-2024 p18-18 kw=1.052"
+      "best": "ICH-M13A p7-8 kw=0.267"
+    },
+    "GQ-19": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-M13A p19-20 kw=0.555"
+    },
+    "GQ-20": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-DISS-1997 p15-16 kw=0.593"
+    },
+    "GQ-21": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-M7R2 p13-14 kw=0.390"
+    },
+    "GQ-22": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": false,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-M9 p13-13 kw=0.449"
+    },
+    "GQ-23": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-SIZE-2022 p8-9 kw=0.481"
+    },
+    "GQ-24": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-PV-2011 p13-14 kw=0.367"
+    },
+    "GQ-25": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": false,
+        "5": false
+      },
+      "document": {
+        "1": false,
+        "3": false,
+        "5": true
+      },
+      "best": "ICH-M9 p1-3 kw=0.214"
+    },
+    "GQ-26": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-ANDA-STAB-2014 p11-12 kw=0.608"
+    },
+    "GQ-27": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-BA-2022 p24-24 kw=0.431"
+    },
+    "GQ-28": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-Q9R1 p21-22 kw=0.359"
+    },
+    "GQ-29": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-Q3CR9 p45-46 kw=0.429"
+    },
+    "GQ-30": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "FDA-NITRO-2024 p45-45 kw=0.448"
+    },
+    "GQ-31": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-Q3DR2 p15-15 kw=0.473"
+    },
+    "GQ-32": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": false,
+        "5": false
+      },
+      "document": {
+        "1": true,
+        "3": true,
+        "5": true
+      },
+      "best": "ICH-Q9R1 p11-11 kw=0.276"
+    },
+    "GQ-33": {
+      "status": "scored",
+      "reason": "",
+      "passage": {
+        "1": false,
+        "3": false,
+        "5": true
+      },
+      "document": {
+        "1": false,
+        "3": false,
+        "5": true
+      },
+      "best": "FDA-DISS-1997 p7-8 kw=0.404"
     }
   }
 }

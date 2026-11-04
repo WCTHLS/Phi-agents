@@ -10,7 +10,7 @@
 ## Phase 1 — Ready after Phase 0 decisions
 - [ ] Build approved-source manifest with provenance fields. (Draft: data/sources/corpus_manifest.csv; approval pending, see ADR-002.)
 - [ ] Select 5–10 permitted sample documents. (15 eligible documents in the manifest; 13 in the corpus, 2 deferred because the correct Gazette PDFs are not yet saved.)
-- [ ] Define 10–20 questions and scientist-approved expected evidence. (17 draft questions in evals/golden_questions.csv; machine-checked, not scientist-approved.)
+- [ ] Define 10–20 questions and scientist-approved expected evidence. (33 draft questions in evals/golden_questions.csv; machine-checked, not scientist-approved.)
 - [ ] Implement document parsing and extraction-quality tests.
 - [ ] Implement chunking, embeddings, and pgvector indexing.
 - [ ] Implement permission-aware retrieval and evidence citations.
