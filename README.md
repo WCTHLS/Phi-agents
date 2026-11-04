@@ -13,7 +13,8 @@ An open-source-first foundation for a pharma-domain AI assistant supporting trus
 | **Audit trail** | The server records who did what: project access, source listing, research queries (as a fingerprint, not the question text), reading the log, and refused requests. |
 | **UI** (React + Vite) | A workspace shell. Its role switcher is a **demo login** and its data is built in, so it does not call the API with a real token yet (see "Try the API"). |
 | **Document ingestion** | An administrator (or the `scripts/ingest_corpus.py` script) can ingest an approved PDF: the original is kept unchanged, fingerprinted (SHA-256) and read page by page, and a project's members can list its documents. Held documents are refused. Scanned pages are recorded as having no text (no OCR yet). |
-| **Not yet** | Chunking, embeddings and search over the ingested text, the answer workflow with a review gate, and a real sign-in screen in the UI. The research answers still come from a small built-in set of sample passages, not from the ingested documents. |
+| **Chunking and embeddings** | `scripts/index_chunks.py` cuts the ingested text into passages of at most 500 tokens (keeping page numbers and section headings) and turns each into 384 numbers with the `BAAI/bge-small-en-v1.5` model, so the database can find passages by meaning. It runs on your own machine and is not yet part of the upload endpoint. See ADR-008. |
+| **Not yet** | Searching the passages from the API, the answer workflow with a review gate, and a real sign-in screen in the UI. The research answers still come from a small built-in set of sample passages, not from the ingested documents. |
 
 ## Start here
 
@@ -60,6 +61,15 @@ docker compose run --rm dev python scripts/ingest_corpus.py --project PRJ-001 --
 ```
 
 It prints one line per document: `v1 added` with page count and whether the pages have text, `already` if that exact file was ingested before, `held` for documents that are not eligible (never ingested), and `missing` if the PDF is not on disk. Originals and extracted text go to `data/storage` (git-ignored). Run it again and nothing changes. Add `--dry-run` to preview.
+
+**3c. Cut the text into passages and embed them** (optional; needs step 3b). This one runs on your own machine, not in the dev tools container: the embedding library includes PyTorch (several hundred MB to install), and the model's download should be kept between runs. Use a virtual environment (see Option B):
+
+```bash
+pip install -e ".[embeddings]"     # once
+python scripts/index_chunks.py
+```
+
+The first run downloads the model's public weights (about 130 MB) from Hugging Face; no document text leaves your machine. It prints one line per document version: `indexed` with the number of passages, `already indexed` if nothing needed doing, or `skipped` for a scan with no text. On a laptop without a GPU expect roughly a third of a second per passage (about 4 minutes for the 13-document corpus) and under 1 GB of memory. Run it again and nothing changes; `--force` cuts and embeds again, `--only ICH-Q3DR2` limits it, `--dry-run` previews without loading the model.
 
 **4. Run the tests.** The database tests need their own empty database (they erase it), so create it once:
 
@@ -227,6 +237,7 @@ If the optional `opentelemetry-api` package is installed (`pip install -e ".[obs
 | `AUTH_MODE`, `AUTH_DEV_SECRET` | `dev` accepts tokens from `scripts/dev_token.py`; `oidc` uses Keycloak. Dev mode is refused unless `ENVIRONMENT` is `local` or `test`. |
 | `AUDIT_BACKEND` | `database` (default) or `memory` (no database; local/test only). |
 | `STORAGE_ROOT`, `MAX_UPLOAD_MB`, `EXTRACTION_ENGINE` | Where ingested originals and extracted text are kept (a folder; a volume in compose), the largest upload accepted, and the PDF reader: `pypdf` (in-process, default) or `tika` (uses `TIKA_URL`, falls back to pypdf). See ADR-007. |
+| `EMBEDDING_MODEL`, `EMBEDDING_BATCH_SIZE`, `CHUNK_SIZE`, `CHUNK_OVERLAP` | The embedding model (must give 384 numbers per passage; default `BAAI/bge-small-en-v1.5`), how many passages it embeds at a time, and how passages are cut (at most 500 tokens, repeating the last 100). Changing any of them means running `scripts/index_chunks.py --force`. See ADR-008. |
 | `LOG_LEVEL`, `LOG_FORMAT` | How much the API logs (`INFO` by default) and how: `json` (default, one JSON object per line) or `text` (readable, for local work). See "Logs" below. |
 | `COMPOSE_FILE`, `COMPOSE_PATH_SEPARATOR` | Make `docker compose` also load the dev tools container. |
 | `LLM_PROVIDER`, `LLM_MODEL` | Not configured yet. Put model endpoints and keys only here, never in Git. |
@@ -283,6 +294,7 @@ pharma-ai-platform/
 │   ├── smoke_test.py                      # End-to-end check of the running API and database
 │   ├── seed_dev_data.py                   # Load roles, sample projects and the source register
 │   ├── ingest_corpus.py                   # Ingest the corpus PDFs: store, fingerprint, extract text
+│   ├── index_chunks.py                    # Cut ingested text into passages and embed them
 │   ├── create_test_database.py            # Create the throwaway database for tests
 │   ├── fetch_corpus.py                    # Download the approved corpus PDFs (not committed)
 │   └── init-db.sql                        # Enables the pgvector extension (tables come from migrations)
@@ -291,7 +303,7 @@ pharma-ai-platform/
 │       ├── api/                           # FastAPI routers & request validation
 │       ├── core/                          # App configuration & settings
 │       ├── features/                      # Domain capabilities
-│       │   ├── documents/                 # Document ingestion service & PDF text extraction
+│       │   ├── documents/                 # Ingestion, PDF text extraction, chunking & indexing
 │       │   ├── doe/                       # Design of Experiments statistical modeling
 │       │   ├── formulation/               # Formulation & excipient compatibility guidance
 │       │   ├── quality_risk/              # Bioavailability, stability & impurity evaluation
@@ -303,6 +315,7 @@ pharma-ai-platform/
 │       │   │   ├── eln_lims/              # Electronic Lab Notebook & LIMS connector
 │       │   │   └── fda_ema/               # FDA, EMA/MHRA & ICH regulatory connector
 │       │   ├── db/                        # Database models, sessions, scoped repositories, seed loader
+│       │   ├── embeddings/                # Embedding model interface + local sentence-transformers model
 │       │   ├── security/                  # Sign-in token checks and project/role permissions
 │       │   └── storage/                   # Object store interface + local-folder store (originals)
 │       ├── workers/                       # Celery + RabbitMQ asynchronous task workers (planned)

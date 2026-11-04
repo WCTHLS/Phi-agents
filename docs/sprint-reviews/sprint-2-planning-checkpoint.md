@@ -3,7 +3,7 @@
 Meeting: Monday 2 Nov 2026 (time and time zone are not stated in the sprint plan).
 Purpose, from the sprint plan: *agree the Sprint 2 goal; confirm the approved document set and the model licence status before ingestion starts.*
 
-Nothing on this page is approved yet. The approval columns and the sign-off block are blank on purpose: they are for the people with authority to fill in. Open questions are numbered Q1 to Q15 in the [decision log](../implementation/decision-log.md).
+**Update, 2 Nov:** no domain expert or external approver is available this sprint, so none is required for Sprint 2 (decision D11 in the decision log). The team's own approval stands for the test corpus, held documents stay held, and every demo output is labelled "not yet reviewed by a domain expert". The approval columns and the sign-off block below are blank on purpose: whoever signs for the team fills them in, and an entry records the team's decision, not a client's or a lawyer's. Open questions are numbered Q1 to Q15 in the [decision log](../implementation/decision-log.md).
 
 **Plain-language terms.** *Ingestion* is reading a document into the system so it can be searched. *Eligible* means the document's own legal notice or publisher policy lets us reuse its text. *Held* means that is not clear, so the document stays out. A *golden question* is a test question with a known correct passage.
 
@@ -25,7 +25,7 @@ Nothing on this page is approved yet. The approval columns and the sign-off bloc
 
 ## 2. Document set to approve for the Sprint 2 test corpus (Q2)
 
-Thirteen documents are eligible and in the corpus. "Basis" is what the manifest records; it was checked from the primary source, but nobody on the team is qualified to judge licences. The approval needs someone with authority.
+Thirteen documents are eligible and in the corpus. "Basis" is what the manifest records; it was checked from the primary source, but nobody on the team is qualified to judge licences. For Sprint 2 the team approves them itself (D11), working with public documents only; this is not legal advice and is not a client approval.
 
 | # | Document ID | Authority | Title | Version | Basis | Approve? | Approver and date |
 |---|---|---|---|---|---|---|---|
@@ -87,8 +87,8 @@ The manifest, not that document, is the source of truth for what may be ingested
 | Role | Model | Licence as recorded | Where recorded | Status |
 |---|---|---|---|---|
 | Language model | `Qwen/Qwen2.5-14B-Instruct` | Not recorded. From memory Apache 2.0: **UNVERIFIED**, check the model card | `models_config.py` (a default, not a decision) | **Open** |
-| Embeddings, production | `BAAI/bge-small-en-v1.5` (384 dimensions) | MIT | ADR-003 | Decided; licence not independently checked |
-| Embeddings, CI and dev | `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions) | Apache 2.0 | ADR-003 | Decided. `models_config.py` still defaults to this model: align it. |
+| Embeddings, production | `BAAI/bge-small-en-v1.5` (384 dimensions) | MIT | ADR-003 | Decided; licence not independently checked. Run on the 13-document corpus on 3 Nov ([ADR-008](../architecture/decisions/ADR-008-chunking-and-embeddings.md)): 128 MB download, under 1 GB of memory, about 0.33 s per passage on the developer laptop. |
+| Embeddings, CI and dev | `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions) | Apache 2.0 | ADR-003 | Decided, but not used yet: the tests use a stand-in model, and `models_config.py` now defaults to bge-small (aligned 3 Nov). |
 | Reranker | `BAAI/bge-reranker-base` | Not recorded | `models_config.py` | Deferred in the proposal |
 | Text extraction | Apache Tika, pypdf fallback | Apache 2.0 (Tika), BSD (pypdf), as stated in ADR-003 | ADR-003 | Decided. Compose and CI now pin `apache/tika:4.2.0` (the version the reader was tested against), not the `2.9.2-full` the ADR names. |
 
@@ -99,19 +99,19 @@ Both embedding models give 384-dimension vectors, so the database column does no
 | # | Decision | Recommendation |
 |---|---|---|
 | 1 | Adopt the reduced Sprint 2 scope (section 1)? | Yes, with the buffer. |
-| 2 | Approve the 13 documents (section 2) for the test corpus? | Yes, by someone with authority, understanding that the basis is a team check and not legal advice. |
-| 3 | Keep the 7 held documents out (section 4)? | Yes. Ask ICH or client counsel about the four ICH guidelines; check EMA's legal notice ourselves. |
+| 2 | Approve the 13 documents (section 2) for the test corpus? | **Decided 2 Nov (D11):** approved by the team for Sprint 2. The basis is a team check, not legal advice. |
+| 3 | Keep the 7 held documents out (section 4)? | **Decided 2 Nov (D11):** yes, they stay out for Sprint 2 because nobody can release them. Checking EMA's legal notice ourselves remains possible if time allows. |
 | 4 | Who saves the 2 Indian PDFs, and by when? | Name an owner today. |
 | 5 | Which language model, and how is it run in development? | Choose a candidate and record its licence from the model card before S2-09. |
 | 6 | Where are original files stored (Q8)? | **Decided by the backend developer on 2 Nov:** a local folder behind a small interface ([ADR-007](../architecture/decisions/ADR-007-document-ingestion-and-storage.md)). Confirm, or name an object store. |
 | 7 | Agree the answer contract (section 1). | Keep the current response shape; do not show `verified` and `confidence_score` as fact. |
 | 8 | Which sign-in service (Q1)? | Decide, or confirm that development tokens are enough until after the Sprint 2 demo. |
-| 9 | Who is the demo scientist (Q5)? | Name one, even for a short review of the 16 golden questions. |
+| 9 | Who is the demo scientist (Q5)? | **Decided 2 Nov (D11):** none this sprint. Demo output is labelled "not yet reviewed by a domain expert" and the golden questions stay machine-checked only. |
 | 10 | What time zone do the ceremonies use (Q14)? | State it in the plan. |
 
 ## 8. Sign-off
 
-To be completed by the people who decide. Leaving a line blank means *not decided*.
+To be completed by the people who decide (for Sprint 2, the team itself: see D11). Leaving a line blank means *not decided*.
 
 | Item | Decision | Name and role | Date |
 |---|---|---|---|
