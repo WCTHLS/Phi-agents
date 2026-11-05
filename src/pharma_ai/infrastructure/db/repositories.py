@@ -255,6 +255,8 @@ class ChunkHit:
     # Set by the keyword search: how well the words match (higher is better; only comparable
     # within one search).
     keyword_score: float | None = None
+    # The document's title from the source register, so a citation can name it.
+    title: str | None = None
 
 
 class ChunkRepository:
@@ -351,6 +353,7 @@ class ChunkRepository:
             attribution=source.attribution,
             distance=distance,
             keyword_score=keyword_score,
+            title=source.title,
         )
 
     def search_nearest(
