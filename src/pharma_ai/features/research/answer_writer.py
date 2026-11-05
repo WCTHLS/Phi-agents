@@ -112,6 +112,7 @@ STOPWORDS = frozenset(
 
 MAX_SENTENCES_PER_PASSAGE = 2
 MAX_QUOTES = 6
+QUOTING_MODE = "quotes-only"
 _WORD = re.compile(r"[a-z0-9]+")
 
 
@@ -162,6 +163,11 @@ class DraftAnswer:
 
     quotes: tuple[Quote, ...]
     mode: str  # which writer produced it: "quotes-only", or a model's name
+    # Shown to the reviewer with the evidence gaps, for example "the model was unavailable".
+    notes: tuple[str, ...] = ()
+    # The provider that was sent the question and passages (even if its reply was not usable), or
+    # None if nothing left this machine. Written to the audit trail.
+    sent_to: str | None = None
 
 
 class AnswerWriter(ABC):
@@ -175,7 +181,7 @@ class AnswerWriter(ABC):
     def write(self, question: str, passages: Sequence[ChunkHit]) -> DraftAnswer: ...
 
 
-def _label(hit: ChunkHit) -> str:
+def passage_label(hit: ChunkHit) -> str:
     where = (
         f"p. {hit.page_start}"
         if hit.page_start == hit.page_end
@@ -200,7 +206,7 @@ def render_quotes(quotes: Iterable[Quote], passages: Sequence[ChunkHit]) -> str:
             grouped[quote.chunk_id] = []
         grouped[quote.chunk_id].append(quote.text)
     return "\n\n".join(
-        f"According to {_label(by_chunk[chunk_id])}:\n"
+        f"According to {passage_label(by_chunk[chunk_id])}:\n"
         + "\n".join(f'"{text}"' for text in grouped[chunk_id])
         for chunk_id in order
         if chunk_id in by_chunk
@@ -210,7 +216,7 @@ def render_quotes(quotes: Iterable[Quote], passages: Sequence[ChunkHit]) -> str:
 class QuotingAnswerWriter(AnswerWriter):
     """No language model: quote the sentences that share the question's distinctive words."""
 
-    mode = "quotes-only"
+    mode = QUOTING_MODE
 
     def write(self, question: str, passages: Sequence[ChunkHit]) -> DraftAnswer:
         wanted = set(content_terms(question))

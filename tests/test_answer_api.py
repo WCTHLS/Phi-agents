@@ -10,17 +10,32 @@ Run with TEST_DATABASE_URL set to an empty throwaway database (see test_db_integ
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Iterator
 
 import pytest
-from db_fixtures import NITRO, PV, Q3D, add_document, events, headers, needs_db
+from db_fixtures import (
+    NITRO,
+    PV,
+    Q3D,
+    add_document,
+    add_spanning_document,
+    events,
+    headers,
+    needs_db,
+)
 from fake_embedder import FakeEmbedder
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from test_llm_writer import FakeModel, picks
 
 from pharma_ai.features.research.answer_workflow import NO_EVIDENCE_ANSWER
+from pharma_ai.features.research.answer_writer import AnswerWriter
+from pharma_ai.features.research.llm_writer import LlmQuoteWriter
+from pharma_ai.features.research.writer_factory import get_answer_writer
 from pharma_ai.infrastructure.audit.service import AuditUnavailableError, get_audit_service
 from pharma_ai.infrastructure.db.models import WorkflowRun
+from pharma_ai.infrastructure.llm import LlmUnavailable
 from pharma_ai.main import app
 
 pytestmark = needs_db
@@ -297,3 +312,174 @@ def test_a_failing_search_is_audited_and_stores_no_run(
     assert run_count(session) == 0
     (event,) = events(api, action="RESEARCH_QUERY_EXECUTED")
     assert event["outcome"] == "FAILURE" and "fell over" not in json.dumps(event)
+
+
+# --- with a language model behind the writer ----------------------------------------------------
+
+
+@pytest.fixture
+def use_writer() -> Iterator[Callable[[AnswerWriter], None]]:
+    def install(writer: AnswerWriter) -> None:
+        app.dependency_overrides[get_answer_writer] = lambda: writer
+
+    yield install
+    app.dependency_overrides.pop(get_answer_writer, None)
+
+
+def test_a_model_backed_answer_is_cited_stored_and_recorded_as_sent_to_the_provider(
+    api: TestClient,
+    session: Session,
+    embedder: FakeEmbedder,
+    use_writer: Callable[[AnswerWriter], None],
+) -> None:
+    add_document(session, embedder, NITRO, "PRJ-001", [PASSAGE])
+    model = FakeModel(picks((1, SENTENCE)))
+    use_writer(LlmQuoteWriter(model, provider="groq"))
+    body = ask(api, MEMBER_1).json()
+    assert body["answer_mode"] == "fake:model" and body["verified"] is True
+    assert body["citations"][0]["quoted_evidence"] == SENTENCE
+    run = session.get(WorkflowRun, body["workflow_run_id"])
+    assert run is not None and run.answer_mode == "fake:model"
+    (event,) = events(api, action="RESEARCH_QUERY_EXECUTED", resource_type="workflow_run")
+    assert event["details"]["sent_to"] == "groq" and event["details"]["answer_mode"] == "fake:model"
+
+
+def test_only_the_question_and_passages_are_sent_to_the_model(
+    api: TestClient,
+    session: Session,
+    embedder: FakeEmbedder,
+    use_writer: Callable[[AnswerWriter], None],
+) -> None:
+    add_document(session, embedder, NITRO, "PRJ-001", [PASSAGE])
+    model = FakeModel(picks((1, SENTENCE)))
+    use_writer(LlmQuoteWriter(model, provider="groq"))
+    body = ask(api, MEMBER_1).json()
+    (call,) = model.calls
+    sent = call["system"] + call["user"]
+    assert QUESTION in sent and PASSAGE in sent
+    chunk_id = body["retrieved_evidence"][0]["chunk_id"]
+    for private in ("user-api-test", "@pharma.local", "PRJ-001", body["workflow_run_id"], chunk_id):
+        assert private not in sent
+    assert body["retrieved_evidence"][0]["sha256"] not in sent
+
+
+def test_a_model_that_cannot_be_used_falls_back_and_the_attempt_is_still_recorded(
+    api: TestClient,
+    session: Session,
+    embedder: FakeEmbedder,
+    use_writer: Callable[[AnswerWriter], None],
+) -> None:
+    add_document(session, embedder, NITRO, "PRJ-001", [PASSAGE])
+    model = FakeModel(error=LlmUnavailable("groq answered with HTTP 429"))
+    use_writer(LlmQuoteWriter(model, provider="groq"))
+    body = ask(api, MEMBER_1).json()
+    assert body["verified"] is True and body["answer_mode"] == "quotes-only"
+    assert body["evidence_gaps"][0].startswith("The language model could not be used (")
+    run = session.get(WorkflowRun, body["workflow_run_id"])
+    assert run is not None and run.evidence_gaps[0] == body["evidence_gaps"][0]
+    (event,) = events(api, action="RESEARCH_QUERY_EXECUTED", resource_type="workflow_run")
+    assert event["details"]["sent_to"] == "groq"  # the data was sent even though the reply failed
+
+
+def test_a_made_up_quote_from_the_model_never_reaches_the_answer_or_the_stored_run(
+    api: TestClient,
+    session: Session,
+    embedder: FakeEmbedder,
+    use_writer: Callable[[AnswerWriter], None],
+) -> None:
+    add_document(session, embedder, NITRO, "PRJ-001", [PASSAGE])
+    invented = "The acceptable intake for NDMA is 960 ng/day."
+    use_writer(LlmQuoteWriter(FakeModel(picks((1, invented))), provider="groq"))
+    body = ask(api, MEMBER_1).json()
+    assert body["verified"] is False and body["citations"] == []
+    assert "960" not in body["answer"] and body["answer"] == NO_EVIDENCE_ANSWER
+    run = session.get(WorkflowRun, body["workflow_run_id"])
+    assert run is not None and "960" not in run.answer and run.citations == []
+
+
+def test_a_refused_request_never_reaches_the_model(
+    api: TestClient,
+    session: Session,
+    embedder: FakeEmbedder,
+    use_writer: Callable[[AnswerWriter], None],
+) -> None:
+    add_document(session, embedder, NITRO, "PRJ-001", [PASSAGE])
+    model = FakeModel(picks((1, SENTENCE)))
+    use_writer(LlmQuoteWriter(model, provider="groq"))
+    assert ask(api, MEMBER_2).status_code == 403
+    assert model.calls == []
+
+
+def test_without_a_model_nothing_is_recorded_as_sent(
+    api: TestClient, session: Session, embedder: FakeEmbedder
+) -> None:
+    add_document(session, embedder, NITRO, "PRJ-001", [PASSAGE])
+    ask(api, MEMBER_1)
+    (event,) = events(api, action="RESEARCH_QUERY_EXECUTED", resource_type="workflow_run")
+    assert event["details"]["sent_to"] is None
+
+
+# --- the page a citation names is the page of the quote -----------------------------------------
+
+PAGE_ONE = "Contributions from processing equipment would be expected to be minimal."
+PAGE_TWO = f"ICH Q3D(R2) Guideline\nOther opening text. {SENTENCE}"
+
+
+def test_a_citation_names_the_page_the_quote_is_on_not_the_first_page_of_its_passage(
+    api: TestClient, session: Session, embedder: FakeEmbedder, store
+) -> None:
+    add_spanning_document(session, embedder, store, NITRO, "PRJ-001", [PAGE_ONE, PAGE_TWO])
+    body = ask(api, MEMBER_1).json()
+    (citation,) = body["citations"]
+    assert citation["quoted_evidence"] == SENTENCE
+    assert (citation["page"], citation["page_end"]) == (2, 2)  # the passage starts on page 1
+    # The passage itself is still reported with its whole range.
+    passage = body["retrieved_evidence"][0]
+    assert (passage["page"], passage["page_end"]) == (1, 2)
+    # The stored run and a later review use the quote's page too.
+    run = session.get(WorkflowRun, body["workflow_run_id"])
+    assert run is not None and (run.citations[0]["page_start"], run.citations[0]["page_end"]) == (
+        2,
+        2,
+    )
+
+
+def test_a_reviewer_sees_the_quotes_page_in_the_cited_sources(
+    api: TestClient, session: Session, embedder: FakeEmbedder, store
+) -> None:
+    add_spanning_document(session, embedder, store, NITRO, "PRJ-001", [PAGE_ONE, PAGE_TWO])
+    run_id = ask(api, MEMBER_BOTH).json()["workflow_run_id"]
+    review = api.post(
+        "/api/v1/research/reviews",
+        json={
+            "workflow_run_id": run_id,
+            "project_id": "PRJ-001",
+            "decision": "APPROVED",
+            "rationale": "Checked on page 2.",
+        },
+        headers=headers(["reviewer"], ["PRJ-001"], sub="reviewer-pages"),
+    )
+    assert review.status_code == 201
+    assert review.json()["cited_sources"] == [f"{NITRO} (v1, p. 2)"]
+
+
+def test_without_stored_page_text_the_citation_keeps_the_passages_page_range(
+    api: TestClient, session: Session, embedder: FakeEmbedder, store
+) -> None:
+    add_spanning_document(
+        session, embedder, store, NITRO, "PRJ-001", [PAGE_ONE, PAGE_TWO], keep_page_text=False
+    )
+    (citation,) = ask(api, MEMBER_1).json()["citations"]
+    assert (citation["page"], citation["page_end"]) == (1, 2)  # true, if less exact
+
+
+def test_unreadable_page_text_does_not_break_the_answer(
+    api: TestClient, session: Session, embedder: FakeEmbedder, store
+) -> None:
+    add_spanning_document(session, embedder, store, NITRO, "PRJ-001", [PAGE_ONE, PAGE_TWO])
+    (stored,) = list(store.root.rglob("*spanning.json"))
+    stored.write_bytes(b"this is not json")
+    response = ask(api, MEMBER_1)
+    assert response.status_code == 200
+    (citation,) = response.json()["citations"]
+    assert (citation["page"], citation["page_end"]) == (1, 2)

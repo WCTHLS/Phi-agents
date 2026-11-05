@@ -20,6 +20,11 @@ os.environ["AUTH_DEV_SECRET"] = TEST_DEV_SECRET
 os.environ["OIDC_ISSUER_URL"] = TEST_ISSUER
 os.environ["AUDIT_BACKEND"] = "memory"
 os.environ["EMBEDDING_WARMUP"] = "false"  # tests must never load a real model in the background
+# Tests must never call a real language model, whatever a developer has put in their own .env
+# (environment variables beat .env). The factory tests build their own settings explicitly.
+os.environ["LLM_PROVIDER"] = "not_configured"
+os.environ["LLM_MODEL"] = "not_configured"
+os.environ["GROQ_API_KEY"] = ""
 
 
 def mint_token(

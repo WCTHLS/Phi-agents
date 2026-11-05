@@ -11,7 +11,7 @@ An open-source-first foundation for a pharma-domain AI assistant supporting trus
 | **API** (FastAPI) | Health and readiness checks, signed-token sign-in, project and role checks, a research Q&A endpoint that answers from a small built-in set of sample passages, and an admin-only audit log. |
 | **Database** (PostgreSQL + pgvector) | Schema v1 with migrations, a seed script that loads the approved-source register, and an append-only audit table. |
 | **Audit trail** | The server records who did what: project access, source listing, research queries (as a fingerprint, not the question text), reading the log, and refused requests. |
-| **UI** (React + Vite) | A workspace shell. Its role switcher is a **demo login** and its data is built in, so it does not call the API with a real token yet (see "Try the API"). |
+| **UI** (React + Vite) | The document library, the question-and-answer screen with its review gate, and the audit viewer read and write the real API (with `AUTH_MODE=dev` the page fetches a signed development token for the role chosen in the top bar). A call that fails shows its error; nothing invented stands in for it. The Trials and Reports tabs still show **sample data**, and say so. |
 | **Document ingestion** | An administrator (or the `scripts/ingest_corpus.py` script) can ingest an approved PDF: the original is kept unchanged, fingerprinted (SHA-256) and read page by page, and a project's members can list its documents. Held documents are refused. Scanned pages are recorded as having no text (no OCR yet). |
 | **Chunking and embeddings** | `scripts/index_chunks.py` cuts the ingested text into passages of at most 500 tokens (keeping page numbers and section headings) and turns each into 384 numbers with the `BAAI/bge-small-en-v1.5` model, so the database can find passages by meaning. It runs on your own machine and is not yet part of the upload endpoint. See ADR-008. |
 | **Search** | Hybrid search (by meaning plus PostgreSQL keywords, merged by rank) in `features/research/search.py`, with the project, eligibility, model and newest-version rules applied inside the SQL (ADR-009). Run `alembic upgrade head` once to add the keyword column (migration 0004). It is behind `POST /api/v1/projects/{project_id}/search` (project members only; the embedding model loads in the background when the API starts, see `EMBEDDING_WARMUP`). `POST /api/v1/research/query` with a `project_id` answers from that project's documents: the answer is made only of quotes found word for word in the retrieved passages, or is withheld, and the run is stored awaiting review (ADR-010; no language model is used yet). Without `project_id` it still returns built-in sample passages, marked `data_source: built_in_sample`. Reviewers record decisions with `POST /api/v1/research/reviews` (`reviewer` or `qa` role) against a stored run; the status change and the audit event are saved together (D15, D16). Run `alembic upgrade head` once more for the new `workflow_runs` table (migration 0005). |
@@ -116,7 +116,7 @@ docker compose down -v           # remove the database and ALL its data (start a
 
 ### Try the API with a real sign-in token
 
-The UI's demo login is not a real token, so the API answers it with `401`. To see the real behaviour, make a signed token for local development (it only works when `AUTH_MODE=dev` and `ENVIRONMENT=local`, which `make_env.py` sets):
+The UI gets its own signed token from the API's development endpoint, so it needs no setup here. To call the API yourself (for example from the API docs), make a signed token for local development (it only works when `AUTH_MODE=dev` and `ENVIRONMENT=local`, which `make_env.py` sets):
 
 ```bash
 docker compose run --rm dev python scripts/dev_token.py --role admin
@@ -217,7 +217,11 @@ Exit code `0` means every check passed. Each run adds a few audit rows for a mad
 
 ### Checking the UI by hand
 
-Start the UI (step 6) and open http://localhost:5173. Switch between Scientist, Reviewer and Admin in the top bar, ask a question on the Research tab, and open the Audit tab as Admin. Everything you see is the UI's own **built-in sample data and demo login**; it is not read from the API or the database yet. So a working UI proves the UI builds and renders, not that it is connected. To see real API behaviour use `scripts/smoke_test.py` or the API docs with a token from `scripts/dev_token.py`.
+Start the API (`uvicorn pharma_ai.main:app --reload`, with `AUTH_MODE=dev`) and the UI (`cd frontend`, `npm install` once, `npm run dev`), then open http://localhost:5173. The UI forwards `/api` calls to port 8000 itself, so the API must be running first.
+1. As **Scientist**, ask a question on the Research tab. You should see quotes from the project's documents with their document, version, page and attribution, a stored run id, and the status "pending expert review". A question the documents cannot answer is withheld.
+2. Switch to **Reviewer** (the answer stays on screen), write a rationale and approve, reject or ask for more evidence. Only a reviewer can; the server checks this too.
+3. Switch to **Admin** and open the Audit tab to see the question and the decision.
+If the API is down or refuses a call you see the error, not an answer. The Trials and Reports tabs show invented sample data and are labelled as such.
 
 ## Logs
 
@@ -243,7 +247,7 @@ If the optional `opentelemetry-api` package is installed (`pip install -e ".[obs
 | `EMBEDDING_WARMUP` | `true` (default): the API loads the embedding model in the background when it starts, so the first search is not slow. The API answers other requests while it loads; a search that arrives early waits for the same load. If the model cannot be loaded (for example the `embeddings` extra is not installed) the API still starts and searches answer 503. The test suite turns it off. |
 | `LOG_LEVEL`, `LOG_FORMAT` | How much the API logs (`INFO` by default) and how: `json` (default, one JSON object per line) or `text` (readable, for local work). See "Logs" below. |
 | `COMPOSE_FILE`, `COMPOSE_PATH_SEPARATOR` | Make `docker compose` also load the dev tools container. |
-| `LLM_PROVIDER`, `LLM_MODEL`, `XAI_API_KEY`, `XAI_BASE_URL`, `LLM_TIMEOUT_SECONDS` | `LLM_PROVIDER=not_configured` (the default): no language model; answers are made by matching the question's words and nothing leaves the machine. `xai` is a development option that sends the question and the retrieved passages to xAI (public documents only). Put model endpoints and keys only in your own `.env`, never in Git. |
+| `LLM_PROVIDER`, `LLM_MODEL`, `GROQ_API_KEY`, `GROQ_BASE_URL`, `LLM_TIMEOUT_SECONDS` | `LLM_PROVIDER=not_configured` (the default): no language model; answers are made by matching the question's words and nothing leaves the machine. `groq` is a development option: a Groq-hosted open-weight model picks the sentences to quote, and the question and the retrieved passages are sent to Groq (public documents only, decision log D19). Every quote is still checked word for word against the passages. If the model is unreachable the answer falls back to word matching and says so. The API refuses to start with `groq` and no key. Put model keys only in your own `.env`, never in Git. |
 
 ## Common problems
 
@@ -255,7 +259,8 @@ If the optional `opentelemetry-api` package is installed (`pip install -e ".[obs
 | Connection refused, or commands hang | Docker is not running, or the database is not `healthy` yet (`docker compose ps`). |
 | `503 Audit trail unavailable` from the API | The database is down or has no tables. Start it and run `alembic upgrade head`, or use `AUDIT_BACKEND=memory`. |
 | `AUTH_MODE=dev is not allowed` / `AUDIT_BACKEND=memory is not allowed` | `ENVIRONMENT` is not `local` or `test`. These modes are blocked outside development on purpose. |
-| The UI shows data but the API answers `401` | Expected: the UI uses a demo login. Use `scripts/dev_token.py` with the API docs instead. |
+| The UI says "Not signed in to the API" or calls answer `401` | The API is not running, or is not in dev mode. Start it with `AUTH_MODE=dev` and `ENVIRONMENT=local` in `.env`, then reload the page. |
+| A document you uploaded disappears from search | A new version is only searched after it has been indexed. Run `python scripts/index_chunks.py`. |
 | A port is already in use (5432, 8000, 5173) | Another program uses it. Change `POSTGRES_PORT` in `.env`, or map a different host port, for example `-p 8001:8000`. |
 | Database tests are skipped | `TEST_DATABASE_URL` is not set in your shell (see Option B). The dev container always sets it; it only needs `create_test_database.py` to have been run once. |
 | Smoke test says it could not reach the API | The API is not running. Start it as in step 5 (the dev container maps port 8000; the smoke test uses `http://127.0.0.1:8000` unless you pass `--base-url`). |

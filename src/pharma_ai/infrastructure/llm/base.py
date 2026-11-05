@@ -19,7 +19,7 @@ class ChatClient(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
-        """Short provider and model name, for example ``xai:grok-4.20-0309-non-reasoning``."""
+        """Short provider and model name, for example ``groq:openai/gpt-oss-20b``."""
 
     @abstractmethod
     def complete_json(

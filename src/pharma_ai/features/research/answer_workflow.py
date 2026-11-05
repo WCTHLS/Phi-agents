@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pharma_ai.features.research.answer_writer import (
+    QUOTING_MODE,
     AnswerWriter,
     Quote,
     coverage,
@@ -40,6 +41,7 @@ class GroundedAnswer:
     quotes: tuple[Quote, ...]  # the verified quotes
     rejected_quotes: int  # offered by the writer but not found in the passage they named
     citations: list[dict[str, Any]]  # one per verified quote, everything a citation needs
+    sent_to: str | None = None  # the outside provider that saw the question and passages, if any
 
 
 def _citations(quotes: Sequence[Quote], found: Sequence[FusedHit]) -> list[dict[str, Any]]:
@@ -73,23 +75,29 @@ def answer_question(
     passages = [f.hit for f in found]
     draft = writer.write(question, passages) if passages else None
     checked = verify(draft.quotes if draft else (), passages)
-    gaps = evidence_gaps(question, passages)
+    notes = list(draft.notes) if draft else []
+    gaps = [*notes, *evidence_gaps(question, passages)]
     mode = draft.mode if draft else writer.mode
+    sent_to = draft.sent_to if draft else None
 
     if not checked.verified:
+        if checked.rejected:
+            reason = "None of the quotes offered could be found in the retrieved passages."
+        elif mode == QUOTING_MODE:
+            reason = "No retrieved passage shares a distinctive word with the question."
+        else:
+            reason = "The language model chose no passage as an answer to the question."
         return GroundedAnswer(
             answer=NO_EVIDENCE_ANSWER,
             verified=False,
             withheld=True,
             mode=mode,
             coverage=0.0,
-            evidence_gaps=[
-                "No retrieved passage shares a distinctive word with the question.",
-                *gaps,
-            ],
+            evidence_gaps=[*notes, reason, *gaps[len(notes) :]],
             quotes=(),
             rejected_quotes=len(checked.rejected),
             citations=[],
+            sent_to=sent_to,
         )
 
     if checked.rejected:
@@ -97,7 +105,7 @@ def answer_question(
             f"{len(checked.rejected)} quote(s) offered by the writer were not found in the "
             "passage they named and were removed."
         )
-        gaps = [removed, *gaps]
+        gaps = [*notes, removed, *gaps[len(notes) :]]
     return GroundedAnswer(
         answer=render_quotes(checked.verified, passages),  # only verified quotes reach the user
         verified=not checked.rejected,
@@ -108,4 +116,5 @@ def answer_question(
         quotes=checked.verified,
         rejected_quotes=len(checked.rejected),
         citations=_citations(checked.verified, found),
+        sent_to=sent_to,
     )

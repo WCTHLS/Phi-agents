@@ -7,10 +7,12 @@ helpers. Needs TEST_DATABASE_URL (an empty throwaway database; see test_db_integ
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from alembic import command
@@ -30,6 +32,7 @@ from pharma_ai.infrastructure.db.repositories import (
 )
 from pharma_ai.infrastructure.db.seed import seed_all
 from pharma_ai.infrastructure.db.session import get_db_session, to_sqlalchemy_url
+from pharma_ai.infrastructure.storage import LocalFolderStore, get_object_store
 from pharma_ai.main import app
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -84,7 +87,15 @@ def model_loads() -> list[int]:
 
 
 @pytest.fixture
-def api(session: Session, embedder: FakeEmbedder, model_loads: list[int]) -> Iterator[TestClient]:
+def store(tmp_path: Path) -> LocalFolderStore:
+    """Where the originals and the extracted page text are kept, in a throwaway folder."""
+    return LocalFolderStore(tmp_path / "files")
+
+
+@pytest.fixture
+def api(
+    session: Session, embedder: FakeEmbedder, model_loads: list[int], store: LocalFolderStore
+) -> Iterator[TestClient]:
     def provider() -> Callable[[], FakeEmbedder]:
         def get() -> FakeEmbedder:
             model_loads.append(1)
@@ -94,9 +105,11 @@ def api(session: Session, embedder: FakeEmbedder, model_loads: list[int]) -> Ite
 
     app.dependency_overrides[get_db_session] = lambda: session
     app.dependency_overrides[embedder_provider] = provider
+    app.dependency_overrides[get_object_store] = lambda: store
     yield TestClient(app)
     app.dependency_overrides.pop(get_db_session, None)
     app.dependency_overrides.pop(embedder_provider, None)
+    app.dependency_overrides.pop(get_object_store, None)
 
 
 def headers(roles: list[str], projects: list[str], sub: str = "user-api-test") -> dict[str, str]:
@@ -155,3 +168,54 @@ def events(client: TestClient, **params) -> list[dict]:
     )
     assert page.status_code == 200
     return page.json()["items"]
+
+
+def add_spanning_document(
+    session: Session,
+    embedder: FakeEmbedder,
+    store: LocalFolderStore,
+    source_id: str,
+    project: str,
+    pages: list[str],
+    *,
+    keep_page_text: bool = True,
+):
+    """A document with ONE passage that runs across all the given pages.
+
+    The passage is the pages' text joined together, as the chunker would make it. With
+    ``keep_page_text`` the page text is also stored, as ingestion does, so a quote's own page can
+    be found.
+    """
+    docs = DocumentRepository(session)
+    document = docs.register_document(source_id)
+    docs.grant_project_access(document.document_id, project)
+    extracted_key = f"extracted/{source_id}-spanning.json" if keep_page_text else None
+    if extracted_key:
+        payload = {"pages": [{"page": n, "text": text} for n, text in enumerate(pages, start=1)]}
+        store.put(extracted_key, json.dumps(payload).encode("utf-8"))
+    version = docs.add_version(
+        document_id=document.document_id,
+        version_number=1,
+        version_label="Revision 1",
+        sha256=uuid.uuid4().hex + uuid.uuid4().hex,
+        object_key=f"originals/{source_id}.pdf",
+        byte_size=100,
+        retrieved_at=NOW,
+        extracted_key=extracted_key,
+    )
+    text = " ".join(" ".join(page.split()) for page in pages)
+    ChunkRepository(session).add_chunks(
+        version.version_id,
+        [
+            ChunkInput(
+                chunk_index=0,
+                page_start=1,
+                page_end=len(pages),
+                text=text,
+                section="Section 1",
+                embedding=embedder.embed([text])[0],
+                embedding_model=embedder.model_name,
+            )
+        ],
+    )
+    return document

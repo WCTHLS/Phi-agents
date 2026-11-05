@@ -23,6 +23,7 @@ from pharma_ai.api.routes.search import router as search_router
 from pharma_ai.api.routes.search import start_warmup
 from pharma_ai.core.config import settings
 from pharma_ai.core.logging_config import configure_logging
+from pharma_ai.features.research.writer_factory import get_answer_writer
 from pharma_ai.infrastructure.audit.service import (
     AuditActor,
     AuditLogService,
@@ -40,6 +41,8 @@ configure_logging(settings.log_level, settings.log_format)
 get_token_verifier()
 # Same for the audit trail (e.g. AUDIT_BACKEND=memory in production). Does not connect to the DB.
 get_audit_service()
+# And for the language-model settings (e.g. LLM_PROVIDER=groq without a key). Sends nothing.
+get_answer_writer()
 
 
 @asynccontextmanager

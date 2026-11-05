@@ -14,15 +14,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from dataclasses import replace
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from pharma_ai.api.routes.documents import StoreDep
 from pharma_ai.api.routes.search import EmbedderProviderDep, SessionDep
 from pharma_ai.features.research.answer_workflow import GroundedAnswer, answer_question
-from pharma_ai.features.research.answer_writer import QuotingAnswerWriter
+from pharma_ai.features.research.answer_writer import AnswerWriter
 from pharma_ai.features.research.answering import ResearchAnsweringService
+from pharma_ai.features.research.citation_pages import refine_citation_pages
 from pharma_ai.features.research.schemas import (
     Citation,
     DocumentMetadata,
@@ -32,6 +35,7 @@ from pharma_ai.features.research.schemas import (
 )
 from pharma_ai.features.research.search import FusedHit, PassageSearch
 from pharma_ai.features.research.source_registry import get_approved_documents
+from pharma_ai.features.research.writer_factory import get_answer_writer
 from pharma_ai.infrastructure.audit.recorder import (
     AuditRecorder,
     AuditRecorderDep,
@@ -48,6 +52,7 @@ from pharma_ai.infrastructure.security.auth import (
     ensure_project_access,
     get_current_principal,
 )
+from pharma_ai.infrastructure.storage import ObjectStore
 
 # Every research endpoint requires an authenticated caller (401 otherwise).
 router = APIRouter(
@@ -56,7 +61,8 @@ router = APIRouter(
     dependencies=[Depends(get_current_principal)],
 )
 _answering_service = ResearchAnsweringService()
-_writer = QuotingAnswerWriter()  # replaced by a model-backed writer once one is chosen (Q3/Q4)
+# Quoting by word matching unless LLM_PROVIDER names a model (writer_factory.py).
+AnswerWriterDep = Annotated[AnswerWriter, Depends(get_answer_writer)]
 
 
 @router.get(
@@ -114,6 +120,7 @@ def _response(
             document_title=f.hit.title or f.hit.source_id,
             section=f.hit.section or "",
             page=f.hit.page_start,
+            page_end=f.hit.page_end,
             text=f.hit.text,
             similarity_score=max(0.0, 1.0 - f.hit.distance) if f.hit.distance is not None else 0.0,
             version_label=f.hit.version_label,
@@ -143,6 +150,8 @@ def _answer_in_project(
     audit: AuditRecorder,
     session: Session,
     embedder_for_search: Callable[[], Embedder],
+    writer: AnswerWriter,
+    store: ObjectStore,
 ) -> ResearchResponse:
     project_id = query.project_id
     assert project_id is not None
@@ -159,7 +168,9 @@ def _answer_in_project(
         found = PassageSearch(session, embedder).search(
             query.query, [project_id], limit=query.top_k
         )
-        result = answer_question(query.query, found, _writer)
+        result = answer_question(query.query, found, writer)
+        # A passage can span two pages; each citation names the page its quote is on.
+        result = replace(result, citations=refine_citation_pages(session, store, result.citations))
     except Exception as exc:
         audit.failure(
             "RESEARCH_QUERY_EXECUTED",
@@ -202,6 +213,8 @@ def _answer_in_project(
             "strict_citation_mode": query.strict_citation_mode,
             "embedding_model": embedder.model_name,
             "answer_mode": result.mode,
+            # The provider that saw the question and passages (even if its reply was unusable).
+            "sent_to": result.sent_to,
             "verified": result.verified,
             "withheld": result.withheld,
             "rejected_quotes": result.rejected_quotes,
@@ -238,6 +251,8 @@ def query_regulatory_research(
     audit: AuditRecorderDep,
     session: SessionDep,
     embedder_for_search: EmbedderProviderDep,
+    writer: AnswerWriterDep,
+    store: StoreDep,
 ) -> ResearchResponse:
     """Execute a grounded regulatory query.
 
@@ -245,7 +260,9 @@ def query_regulatory_research(
     confidential product details, and the audit trail can never be edited or deleted.
     """
     if query.project_id is not None:
-        return _answer_in_project(query, principal, audit, session, embedder_for_search)
+        return _answer_in_project(
+            query, principal, audit, session, embedder_for_search, writer, store
+        )
 
     try:
         response = _answering_service.answer_query(query)

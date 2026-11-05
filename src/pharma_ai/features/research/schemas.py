@@ -27,10 +27,13 @@ class EvidenceChunk(BaseModel):
     source_id: str
     document_title: str
     section: str
-    page: int
+    page: int  # the first page of the passage
     text: str
     similarity_score: float = Field(0.0, description="Relevance similarity or reranking score")
     # Set when the passage comes from a project's stored documents (S2-09).
+    page_end: int | None = Field(
+        None, description="The last page of the passage (it can span pages)"
+    )
     version_label: str | None = None
     version_number: int | None = None
     sha256: str | None = Field(None, description="SHA-256 of the document version quoted")
