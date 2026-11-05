@@ -15,6 +15,8 @@ Plain-language map of the tables:
 - ``chunks``: small searchable pieces of a document version, each with an embedding. An embedding
   is a list of 384 numbers that represents the meaning of the text, so that similar text can be
   found by comparing numbers (done by the pgvector extension).
+- ``workflow_runs``: one question asked of a project's documents, the answer given with its
+  citations, and its review status (S2-09). The status is updated when a reviewer decides.
 - ``audit_events``: the append-only record of who did what and when. Rows cannot be changed or
   deleted (enforced by database triggers created in the migration).
 
@@ -319,6 +321,53 @@ class Chunk(Base):
             postgresql_with={"m": 16, "ef_construction": 64},
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
+    )
+
+
+class WorkflowRun(Base):
+    """One question asked of a project's documents, the answer given and where it stands in review.
+
+    Unlike the audit trail this row is updated: ``status`` moves from PENDING_EXPERT_REVIEW to the
+    reviewer's latest decision. Every decision is also an audit event (the history), written in the
+    same transaction as the status change.
+    """
+
+    __tablename__ = "workflow_runs"
+
+    # Issued by the server ("RUN-" plus random characters); the review screen sends it back.
+    run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.project_id"))
+    asked_by: Mapped[str] = mapped_column(String(128))  # the login token's stable subject ID
+    asked_by_email: Mapped[str | None] = mapped_column(String(320))
+    # The question and answer are kept here, readable only by members of the project. The audit
+    # trail keeps only a fingerprint of the question (ADR-005).
+    question: Mapped[str] = mapped_column(Text)
+    question_sha256: Mapped[str] = mapped_column(String(64))
+    answer: Mapped[str] = mapped_column(Text)
+    answer_mode: Mapped[str] = mapped_column(String(128))  # "quotes-only" or the model's name
+    verified: Mapped[bool] = mapped_column(Boolean)  # every quote was found in a retrieved passage
+    coverage: Mapped[float] = mapped_column()  # share of the question's content words quoted (0..1)
+    evidence_gaps: Mapped[list[Any]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    citations: Mapped[list[Any]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    retrieved: Mapped[list[Any]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    embedding_model: Mapped[str] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(String(32), server_default=text("'PENDING_EXPERT_REVIEW'"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_NOW)
+    decided_by: Mapped[str | None] = mapped_column(String(128))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PENDING_EXPERT_REVIEW', 'APPROVED', 'REJECTED', 'EVIDENCE_REQUESTED')",
+            name="status_values",
+        ),
+        CheckConstraint("coverage >= 0 AND coverage <= 1", name="coverage_range"),
+        CheckConstraint(
+            "(status = 'PENDING_EXPERT_REVIEW') = (decided_at IS NULL) "
+            "AND (decided_at IS NULL) = (decided_by IS NULL)",
+            name="decision_with_status",
+        ),
+        Index("ix_workflow_runs_project_id_created_at", "project_id", "created_at"),
     )
 
 

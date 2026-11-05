@@ -14,5 +14,5 @@
 - [ ] Implement document parsing and extraction-quality tests.
 - [ ] Implement chunking, embeddings, and pgvector indexing.
 - [ ] Implement permission-aware retrieval and evidence citations.
-- [ ] Add Haystack orchestration and an approved LLM adapter.
+- [ ] Add LangGraph workflow orchestration (after the Sprint 2 demo, D17) and an approved LLM adapter.
 - [ ] Evaluate retrieval and grounded answers; document known failures.

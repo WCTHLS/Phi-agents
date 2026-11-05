@@ -13,5 +13,5 @@ Automated validation pipelines to guarantee domain authenticity, zero-hallucinat
    - Evaluated automatically in CI/CD before any prompt, chunking strategy, or model weight change is deployed.
 
 3. **Observability & Metrics:**
-   - OpenTelemetry instrumentation for end-to-end tracing across API, Haystack pipelines, Celery workers, and vLLM inference.
+   - OpenTelemetry instrumentation for end-to-end tracing across API, LangGraph workflows, Celery workers, and vLLM inference.
    - Prometheus metrics for retrieval latency, token throughput, failure rates, and citation verification pass ratios.

@@ -29,6 +29,8 @@ from pydantic import BaseModel, Field
 from pharma_ai.core.config import Settings, settings
 
 if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
     from pharma_ai.infrastructure.security.auth import Principal
 
 OUTCOMES = ("SUCCESS", "DENIED", "FAILURE")
@@ -124,8 +126,14 @@ class AuditLogService(ABC):
         resource_version: str | None = None,
         outcome: str = "SUCCESS",
         details: dict[str, Any] | None = None,
+        session: Session | None = None,
     ) -> AuditEvent:
-        """Append one event and return it. Raises AuditUnavailableError if it cannot be stored."""
+        """Append one event and return it. Raises AuditUnavailableError if it cannot be stored.
+
+        With ``session`` the event joins the caller's open database transaction instead of
+        committing on its own: it is saved if and only if the caller commits, so a change and the
+        event that records it are saved together or not at all (ADR-005). The caller must commit.
+        """
 
     @abstractmethod
     def list_events(
@@ -162,7 +170,9 @@ class InMemoryAuditLogService(AuditLogService):
         resource_version: str | None = None,
         outcome: str = "SUCCESS",
         details: dict[str, Any] | None = None,
+        session: Session | None = None,
     ) -> AuditEvent:
+        # The in-memory trail has no transaction to join: the event is kept at once. (Tests only.)
         validate_event_fields(action, resource_type, outcome)
         moment = datetime.now(UTC)
         event = AuditEvent(

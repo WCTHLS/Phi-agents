@@ -63,3 +63,7 @@ def make_token() -> Callable[..., str]:
 def auth_headers() -> dict[str, str]:
     """Headers for a scientist who is a member of PRJ-001 only."""
     return {"Authorization": f"Bearer {mint_token()}"}
+
+
+# Shared fixtures for API tests that need a real database (see db_fixtures.py).
+pytest_plugins = ("db_fixtures",)

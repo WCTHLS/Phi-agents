@@ -82,5 +82,8 @@ docker-compose.override.yml
 *.swo
 desktop.ini
 
+# Client-facing planning document (draft, classification not yet confirmed). Kept local, not in Git.
+/Pharmaceutical AI Platform - PRD.docx
+
 # Claude Code local settings
 .claude/settings.local.json

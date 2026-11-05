@@ -37,7 +37,7 @@ Estimates are planning ranges for two developers, not commitments. They exclude 
 
 ## Day 5
 
-1. Add Haystack pipeline and grounded answer response schema with citations/source links.
+1. Add the grounded answer workflow (plain functions now, LangGraph after the Sprint 2 demo, decision log D17) and response schema with citations/source links.
 2. Run the baseline evaluation, review failures with the scientist/domain contact, and demo only what passes the agreed checks.
 
 **Do not begin Phase 2 until Phase 1 can retrieve evidence and cite it reliably on an agreed small test set.**

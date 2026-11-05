@@ -80,6 +80,7 @@ class DatabaseAuditLogService(AuditLogService):
         resource_version: str | None = None,
         outcome: str = "SUCCESS",
         details: dict[str, Any] | None = None,
+        session: Session | None = None,
     ) -> AuditEvent:
         validate_event_fields(action, resource_type, outcome)
         row = AuditEventRow(
@@ -96,10 +97,17 @@ class DatabaseAuditLogService(AuditLogService):
             details=dict(details or {}),
         )
         try:
-            with self._session_factory() as session:
+            if session is not None:
+                # Join the caller's transaction: flushed here so a refusal by the database shows
+                # up now, saved only when the caller commits.
                 session.add(row)
-                session.commit()
-                session.refresh(row)  # picks up the event ID and the database's own timestamp
+                session.flush()
+                session.refresh(row)
+                return _to_api(row)
+            with self._session_factory() as own_session:
+                own_session.add(row)
+                own_session.commit()
+                own_session.refresh(row)  # picks up the event ID and the database's own timestamp
                 return _to_api(row)
         except SQLAlchemyError as exc:
             raise AuditUnavailableError("audit event could not be stored") from exc

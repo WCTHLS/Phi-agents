@@ -27,6 +27,7 @@ EXPECTED_TABLES = {
     "document_versions",
     "project_documents",
     "chunks",
+    "workflow_runs",
     "audit_events",
 }
 

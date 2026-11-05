@@ -2,6 +2,7 @@
 
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +36,19 @@ class Settings(BaseSettings):
     # of the next one (ADR-003). The model reads 512 tokens including two markers, so keep it below.
     chunk_size: int = 500
     chunk_overlap: int = 100
+
+    # Language model for answers (S2-09, ADR-010). "not_configured": no model, answers are made by
+    # matching the question's words (nothing leaves this machine). "xai": a hosted Grok model picks
+    # the sentences to quote; the question and the retrieved passages are sent to xAI. For
+    # development on public documents only (to be recorded in the decision log). These names
+    # already existed in .env.example as placeholders. The key is a secret: set it in .env only.
+    llm_provider: Literal["not_configured", "xai"] = "not_configured"
+    # "not_configured" means the provider's default model (xai: DEFAULT_XAI_MODEL in the factory).
+    llm_model: str = "not_configured"
+    xai_api_key: SecretStr | None = None
+    # Must be https and an x.ai host, so the key cannot be sent anywhere else by a typo.
+    xai_base_url: str = "https://api.x.ai/v1"
+    llm_timeout_seconds: float = 30.0
 
     # Where the audit trail is stored (S1-11). "memory" is for tests and database-less local runs
     # and is refused unless ENVIRONMENT is local or test.

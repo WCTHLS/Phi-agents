@@ -13,7 +13,7 @@ import re
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import and_, exists, func, select
@@ -27,6 +27,7 @@ from pharma_ai.infrastructure.db.models import (
     Project,
     ProjectDocument,
     Source,
+    WorkflowRun,
 )
 
 
@@ -464,3 +465,71 @@ class ChunkRepository:
             self._hit(chunk, version, source, keyword_score=float(score))
             for chunk, version, source, score in self._session.execute(stmt)
         ]
+
+
+def new_run_id() -> str:
+    """A fresh run ID, for example ``RUN-1A2B3C4D5E6F`` (48 random bits; the primary key refuses a repeat)."""
+    return "RUN-" + uuid.uuid4().hex[:12].upper()
+
+
+@dataclass(frozen=True)
+class RunInput:
+    """Everything stored when an answer is given (see ``WorkflowRun``)."""
+
+    run_id: str
+    project_id: str
+    asked_by: str
+    asked_by_email: str | None
+    question: str
+    question_sha256: str
+    answer: str
+    answer_mode: str
+    verified: bool
+    coverage: float
+    evidence_gaps: list[Any]
+    citations: list[Any]
+    retrieved: list[Any]
+    embedding_model: str
+
+
+class WorkflowRunRepository:
+    """Stored answers and their review status. Reads are always inside one project."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, data: RunInput) -> WorkflowRun:
+        run = WorkflowRun(
+            run_id=data.run_id,
+            project_id=data.project_id,
+            asked_by=data.asked_by,
+            asked_by_email=data.asked_by_email,
+            question=data.question,
+            question_sha256=data.question_sha256,
+            answer=data.answer,
+            answer_mode=data.answer_mode,
+            verified=data.verified,
+            coverage=data.coverage,
+            evidence_gaps=list(data.evidence_gaps),
+            citations=list(data.citations),
+            retrieved=list(data.retrieved),
+            embedding_model=data.embedding_model,
+        )
+        self._session.add(run)
+        self._session.flush()
+        self._session.refresh(run)  # picks up the status default and the database's timestamp
+        return run
+
+    def get_in_project(self, run_id: str, project_id: str) -> WorkflowRun | None:
+        """The run, only if it belongs to ``project_id`` (a run of another project is not found)."""
+        stmt = select(WorkflowRun).where(
+            WorkflowRun.run_id == run_id, WorkflowRun.project_id == project_id
+        )
+        return self._session.scalars(stmt).one_or_none()
+
+    def record_decision(self, run: WorkflowRun, *, status: str, decided_by: str) -> None:
+        """Move the run to the reviewer's latest decision. The caller commits."""
+        run.status = status
+        run.decided_by = decided_by
+        run.decided_at = datetime.now(UTC)
+        self._session.flush()

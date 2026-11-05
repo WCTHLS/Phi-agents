@@ -14,7 +14,7 @@ An open-source-first foundation for a pharma-domain AI assistant supporting trus
 | **UI** (React + Vite) | A workspace shell. Its role switcher is a **demo login** and its data is built in, so it does not call the API with a real token yet (see "Try the API"). |
 | **Document ingestion** | An administrator (or the `scripts/ingest_corpus.py` script) can ingest an approved PDF: the original is kept unchanged, fingerprinted (SHA-256) and read page by page, and a project's members can list its documents. Held documents are refused. Scanned pages are recorded as having no text (no OCR yet). |
 | **Chunking and embeddings** | `scripts/index_chunks.py` cuts the ingested text into passages of at most 500 tokens (keeping page numbers and section headings) and turns each into 384 numbers with the `BAAI/bge-small-en-v1.5` model, so the database can find passages by meaning. It runs on your own machine and is not yet part of the upload endpoint. See ADR-008. |
-| **Search** | Hybrid search (by meaning plus PostgreSQL keywords, merged by rank) in `features/research/search.py`, with the project, eligibility, model and newest-version rules applied inside the SQL (ADR-009). Run `alembic upgrade head` once to add the keyword column (migration 0004). It is not behind an API endpoint yet. |
+| **Search** | Hybrid search (by meaning plus PostgreSQL keywords, merged by rank) in `features/research/search.py`, with the project, eligibility, model and newest-version rules applied inside the SQL (ADR-009). Run `alembic upgrade head` once to add the keyword column (migration 0004). It is behind `POST /api/v1/projects/{project_id}/search` (project members only; the embedding model loads in the background when the API starts, see `EMBEDDING_WARMUP`). `POST /api/v1/research/query` with a `project_id` answers from that project's documents: the answer is made only of quotes found word for word in the retrieved passages, or is withheld, and the run is stored awaiting review (ADR-010; no language model is used yet). Without `project_id` it still returns built-in sample passages, marked `data_source: built_in_sample`. Reviewers record decisions with `POST /api/v1/research/reviews` (`reviewer` or `qa` role) against a stored run; the status change and the audit event are saved together (D15, D16). Run `alembic upgrade head` once more for the new `workflow_runs` table (migration 0005). |
 | **Not yet** | Searching the passages from the API, the answer workflow with a review gate, and a real sign-in screen in the UI. The research answers still come from a small built-in set of sample passages, not from the ingested documents. |
 
 ## Start here
@@ -243,7 +243,7 @@ If the optional `opentelemetry-api` package is installed (`pip install -e ".[obs
 | `EMBEDDING_WARMUP` | `true` (default): the API loads the embedding model in the background when it starts, so the first search is not slow. The API answers other requests while it loads; a search that arrives early waits for the same load. If the model cannot be loaded (for example the `embeddings` extra is not installed) the API still starts and searches answer 503. The test suite turns it off. |
 | `LOG_LEVEL`, `LOG_FORMAT` | How much the API logs (`INFO` by default) and how: `json` (default, one JSON object per line) or `text` (readable, for local work). See "Logs" below. |
 | `COMPOSE_FILE`, `COMPOSE_PATH_SEPARATOR` | Make `docker compose` also load the dev tools container. |
-| `LLM_PROVIDER`, `LLM_MODEL` | Not configured yet. Put model endpoints and keys only here, never in Git. |
+| `LLM_PROVIDER`, `LLM_MODEL`, `XAI_API_KEY`, `XAI_BASE_URL`, `LLM_TIMEOUT_SECONDS` | `LLM_PROVIDER=not_configured` (the default): no language model; answers are made by matching the question's words and nothing leaves the machine. `xai` is a development option that sends the question and the retrieved passages to xAI (public documents only). Put model endpoints and keys only in your own `.env`, never in Git. |
 
 ## Common problems
 
@@ -357,7 +357,7 @@ pharma-ai-platform/
 - **Frontend:** React + Vite (3-panel researcher workspace: Sources/Verification, Q&A Assistant, DOE & Report Draft Studio)
 - **API Backend:** FastAPI
 - **Authentication & Identity:** Keycloak SSO (OIDC)
-- **RAG Orchestration:** Haystack (Phase 1)
+- **Workflow orchestration:** LangGraph (Phase 1, PRD FR-28), adopted after the Sprint 2 demo; plain functions until then (decision log D17)
 - **Document Extraction & OCR:** Apache Tika + Tesseract OCR for scanned PDF filings
 - **Embeddings & Vector Store:** Sentence Transformers with PostgreSQL + pgvector
 - **LLM Serving:** On-premises local vLLM endpoint

@@ -69,6 +69,7 @@ NOW = datetime(2026, 10, 29, tzinfo=UTC)
 MODEL = "test-model"  # the embedding model name the test chunks are stored under
 
 TABLES = {
+    "workflow_runs",
     "roles",
     "users",
     "projects",

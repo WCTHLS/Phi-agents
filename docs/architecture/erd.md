@@ -14,6 +14,7 @@ erDiagram
     sources ||--o| documents : "ingested as"
     documents ||--o{ document_versions : "has versions"
     document_versions ||--o{ chunks : "split into"
+    projects ||--o{ workflow_runs : "questions asked in"
 
     roles {
         string role_key PK "scientist, reviewer, qa, admin"
@@ -76,6 +77,24 @@ erDiagram
         vector embedding "384 numbers"
         string embedding_model
     }
+    workflow_runs {
+        string run_id PK "issued by the server, for example RUN-1A2B3C4D5E6F"
+        string project_id FK
+        string asked_by "stable subject ID from the login token"
+        text question "readable by project members only"
+        string question_sha256
+        text answer
+        string answer_mode "quotes-only or a model name"
+        boolean verified "every quote found in a retrieved passage"
+        float coverage "share of the question's words quoted, 0 to 1"
+        jsonb evidence_gaps
+        jsonb citations "chunk, source, version, pages, quote"
+        jsonb retrieved "every passage returned, with its ranks"
+        string embedding_model
+        string status "PENDING_EXPERT_REVIEW, APPROVED, REJECTED, EVIDENCE_REQUESTED"
+        string decided_by
+        timestamp decided_at
+    }
     audit_events {
         uuid event_id PK
         string actor_id "stable subject ID from the login token"
@@ -103,6 +122,7 @@ erDiagram
 | Originals are never edited | PRD ALCOA+ "original" | A trigger refuses any change to `sha256`, `object_key` or `byte_size` of a stored version. A revision is a new version. |
 | Each chunk belongs to one version, in order | S2-06 | Unique `(version_id, chunk_index)`; page range check (`page_end >= page_start`). |
 | A vector always records which model made it | ADR-003 | Check: `embedding` and `embedding_model` are both set or both empty. |
+| An answer is pending review exactly when nobody has decided it | S2-09, S2-10 | `workflow_runs` checks: `status` is one of four values, and `decided_by` and `decided_at` are both empty exactly when the status is PENDING_EXPERT_REVIEW. A decision and its audit event are saved in one transaction (migration 0005). |
 | Audit records cannot be altered | PRD FR-30, NFR-07 | Triggers refuse UPDATE, DELETE and TRUNCATE on `audit_events`. |
 | Audit outcomes are a fixed set | S1-11 | Check: `outcome` is SUCCESS, DENIED or FAILURE. |
 | Audit records are written by the server | S1-11, ADR-005 | The API records events from the verified login token; there is no endpoint for a client to write one. |

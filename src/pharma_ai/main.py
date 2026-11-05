@@ -18,6 +18,7 @@ from pharma_ai.api.routes.documents import router as documents_router
 from pharma_ai.api.routes.health import router as health_router
 from pharma_ai.api.routes.projects import router as projects_router
 from pharma_ai.api.routes.research import router as research_router
+from pharma_ai.api.routes.reviews import router as reviews_router
 from pharma_ai.api.routes.search import router as search_router
 from pharma_ai.api.routes.search import start_warmup
 from pharma_ai.core.config import settings
@@ -129,4 +130,5 @@ app.include_router(projects_router)
 app.include_router(documents_router)
 app.include_router(search_router)
 app.include_router(research_router)
+app.include_router(reviews_router)
 app.include_router(audit_router, prefix="/api/v1/audit", tags=["audit"])

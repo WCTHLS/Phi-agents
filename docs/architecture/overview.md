@@ -14,7 +14,7 @@
 
 - User interface (future): React/Vite
 - API: FastAPI (implemented minimally)
-- RAG orchestration (Phase 1): Haystack
+- Workflow orchestration (Phase 1): LangGraph (PRD FR-28), adopted after the Sprint 2 demo; plain functions until then (decision log D17). Haystack was the earlier choice and is superseded.
 - Parsing: text extraction first; OCR for scanned files as needed
 - Embeddings: evaluate a CPU-compatible Sentence Transformers model
 - Retrieval store: PostgreSQL + pgvector for the initial MVP
