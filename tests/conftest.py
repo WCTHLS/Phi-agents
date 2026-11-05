@@ -19,6 +19,7 @@ os.environ["AUTH_MODE"] = "dev"
 os.environ["AUTH_DEV_SECRET"] = TEST_DEV_SECRET
 os.environ["OIDC_ISSUER_URL"] = TEST_ISSUER
 os.environ["AUDIT_BACKEND"] = "memory"
+os.environ["EMBEDDING_WARMUP"] = "false"  # tests must never load a real model in the background
 
 
 def mint_token(

@@ -1,6 +1,8 @@
 """FastAPI application entry point."""
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler
@@ -17,6 +19,7 @@ from pharma_ai.api.routes.health import router as health_router
 from pharma_ai.api.routes.projects import router as projects_router
 from pharma_ai.api.routes.research import router as research_router
 from pharma_ai.api.routes.search import router as search_router
+from pharma_ai.api.routes.search import start_warmup
 from pharma_ai.core.config import settings
 from pharma_ai.core.logging_config import configure_logging
 from pharma_ai.infrastructure.audit.service import (
@@ -37,9 +40,18 @@ get_token_verifier()
 # Same for the audit trail (e.g. AUDIT_BACKEND=memory in production). Does not connect to the DB.
 get_audit_service()
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Start loading the embedding model in the background; the API does not wait for it."""
+    start_warmup()
+    yield
+
+
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
+    lifespan=lifespan,
     description=(
         "Starter API for a scientist-assistance platform. Generated outputs will require "
         "evidence traceability and qualified human review."

@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # the database column); changing it means the stored passages are embedded again.
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_batch_size: int = 32
+    # Load the model in the background when the API starts, so the first search does not wait for
+    # it (the first load took minutes on a laptop). The API answers other requests meanwhile.
+    embedding_warmup: bool = True
     # Passages are cut to at most this many tokens, repeating the last `overlap` tokens at the start
     # of the next one (ADR-003). The model reads 512 tokens including two markers, so keep it below.
     chunk_size: int = 500

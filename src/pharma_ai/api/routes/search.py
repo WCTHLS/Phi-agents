@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from typing import Annotated
@@ -72,6 +73,34 @@ def get_embedder() -> Embedder:
                     detail="Search is unavailable: the embedding model could not be loaded",
                 ) from exc
         return _embedder
+
+
+def _warm_up() -> None:
+    started = time.monotonic()
+    try:
+        embedder = get_embedder()
+    except HTTPException:
+        return  # get_embedder has already logged the reason; a search will try again later
+    logger.info(
+        "Embedding model %s is ready (%.1f s); searches will not wait for it",
+        embedder.model_name,
+        time.monotonic() - started,
+    )
+
+
+def start_warmup() -> threading.Thread | None:
+    """Load the embedding model in the background (when EMBEDDING_WARMUP is on).
+
+    Returns the thread, or None if warm-up is off. The thread never raises: if the model cannot be
+    loaded the API still starts, and a search then answers 503 (and tries to load it again).
+    A search that arrives during the load waits for it instead of starting a second load.
+    """
+    if not settings.embedding_warmup:
+        return None
+    thread = threading.Thread(target=_warm_up, name="embedding-warmup", daemon=True)
+    thread.start()
+    logger.info("Loading embedding model %s in the background", settings.embedding_model)
+    return thread
 
 
 def embedder_provider() -> Callable[[], Embedder]:
