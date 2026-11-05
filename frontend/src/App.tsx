@@ -19,39 +19,6 @@ import { createDevSession, OidcSession, requestDevToken, UserRole } from "./auth
 
 export type WorkspaceTab = "research" | "trials" | "reports" | "audit";
 
-const FALLBACK_SOURCES: DocumentMetadata[] = [
-  {
-    source_id: "fda-nitrosamines-rev1",
-    title: "Control of Nitrosamine Impurities in Human Drugs: Guidance for Industry (Rev 1)",
-    publisher: "FDA",
-    publication_date: "2021-02-24",
-    version: "Revision 1",
-    url_or_identifier: "FDA-2020-D-1530",
-    content_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    notes: "Acceptable intake limits (NDMA 96 ng/day, NDEA 26.5 ng/day) and 3-step mitigation.",
-  },
-  {
-    source_id: "ich-q8-r2-pharma-dev",
-    title: "ICH Harmonised Tripartite Guideline: Pharmaceutical Development Q8(R2)",
-    publisher: "ICH",
-    publication_date: "2009-08-01",
-    version: "Step 4",
-    url_or_identifier: "ICH-Q8-R2",
-    content_hash: "7d865e959b2466918c9863afca942d0fb89d7c9ac0c99bafc3749504ded97730",
-    notes: "Quality Target Product Profile (QTPP), CQAs, CPPs, and Design Space.",
-  },
-  {
-    source_id: "ich-q3d-elemental-impurities",
-    title: "ICH Guideline Q3D(R2) on Elemental Impurities",
-    publisher: "ICH",
-    publication_date: "2022-04-26",
-    version: "Revision 2",
-    url_or_identifier: "ICH-Q3D-R2",
-    content_hash: "b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c",
-    notes: "Oral PDE limits for Class 1 elemental impurities (Cd, Pb, As, Hg).",
-  },
-];
-
 interface AuditRecord {
   id: string;
   timestamp: string;
@@ -63,306 +30,6 @@ interface AuditRecord {
   resource: string;
   details: string;
 }
-
-const INITIAL_AUDIT_LOGS: AuditRecord[] = [
-  {
-    id: "AUD-1000",
-    timestamp: "2026-10-29 08:50:11 UTC",
-    actor: "admin@pharma.local",
-    role: "admin",
-    project: "PRJ-001",
-    workflowRunId: "INGEST-ICH-Q3DR2-V1",
-    action: "DOCUMENT_INGESTED",
-    resource: "ICH-Q3DR2",
-    details: "Ingested ICH-Q3DR2 v1 (88 pages, status=ok, sha256=2dc1fdcd014b...)",
-  },
-  {
-    id: "AUD-1000B",
-    timestamp: "2026-10-29 08:52:04 UTC",
-    actor: "admin@pharma.local",
-    role: "admin",
-    project: "PRJ-001",
-    workflowRunId: "INDEX-ICH-Q3DR2-V1",
-    action: "DOCUMENT_INDEXED",
-    resource: "ICH-Q3DR2",
-    details: "Indexed 142 chunks into pgvector with BAAI/bge-small-en-v1.5",
-  },
-  {
-    id: "AUD-1001",
-    timestamp: "2026-10-29 09:15:02 UTC",
-    actor: "a.thorne@pharma.local",
-    role: "scientist",
-    project: "PRJ-001",
-    workflowRunId: "RUN-2026-101",
-    action: "RESEARCH_QUERY_EXECUTED",
-    resource: "fda-nitrosamines-rev1",
-    details: "workflow_run_id=RUN-2026-101 | Queried NDMA AI limit (cited Section III, p. 10)",
-  },
-  {
-    id: "AUD-1001B",
-    timestamp: "2026-10-29 09:22:30 UTC",
-    actor: "e.vance@pharma.local",
-    role: "reviewer",
-    project: "PRJ-001",
-    workflowRunId: "RUN-2026-101",
-    action: "ANSWER_REVIEW_APPROVED",
-    resource: "RUN-2026-101",
-    details: "Approved cited answer for RUN-2026-101 (sources: fda-nitrosamines-rev1 p. 10)",
-  },
-  {
-    id: "AUD-1002",
-    timestamp: "2026-10-29 10:04:19 UTC",
-    actor: "e.vance@pharma.local",
-    role: "reviewer",
-    project: "PRJ-001",
-    workflowRunId: "DOE-RUN-102",
-    action: "TRIAL_VERIFICATION_APPROVED",
-    resource: "DOE-RUN-102",
-    details: "Verified low-nitrite MCC excipient batch met < 24 ng/day NDMA threshold",
-  },
-  {
-    id: "AUD-1003",
-    timestamp: "2026-10-29 11:30:44 UTC",
-    actor: "a.thorne@pharma.local",
-    role: "scientist",
-    project: "PRJ-002",
-    workflowRunId: "RUN-2026-102",
-    action: "RESEARCH_QUERY_EXECUTED",
-    resource: "ich-q3d-elemental-impurities",
-    details: "workflow_run_id=RUN-2026-102 | Queried Class 1 oral PDE limits for Cd and Pb (p. 12)",
-  },
-  {
-    id: "AUD-1004",
-    timestamp: "2026-10-29 13:22:10 UTC",
-    actor: "e.vance@pharma.local",
-    role: "reviewer",
-    project: "PRJ-001",
-    workflowRunId: "RUN-2026-101",
-    action: "REPORT_SECTION_APPROVED",
-    resource: "PDR-3.2.P.2-v1.2",
-    details: "Approved CTD 3.2.P.2 Pharmaceutical Development Nitrosamine Control Strategy",
-  },
-];
-
-const INITIAL_REVIEW_HISTORY: ReviewHistoryEntry[] = [
-  {
-    review_id: "REV-1001",
-    workflow_run_id: "RUN-2026-101",
-    project_id: "PRJ-001",
-    decision: "APPROVED",
-    rationale:
-      "Verified NDMA (96 ng/day) and NDEA (26.5 ng/day) limits against FDA-2020-D-1530 Rev 1, Section III, page 10.",
-    reviewer_email: "e.vance@pharma.local",
-    reviewer_role: "reviewer",
-    cited_sources: ["fda-nitrosamines-rev1 (v1, p. 10)"],
-    timestamp: "2026-10-29 09:22:30 UTC",
-    audit_event_id: "AUD-1001B",
-  },
-];
-
-const DEFAULT_PREVIEW_RESULT: ResearchResponse = {
-  query: "What are the acceptable intake limits for NDMA and NDEA according to FDA?",
-  answer:
-    'According to Control of Nitrosamine Impurities in Human Drugs: Guidance for Industry (Rev 1) (Section III. Acceptable Intake Limits, p. 10):\n"The recommended acceptable intake (AI) limits for nitrosamines in human pharmaceuticals are: NDMA (N-Nitrosodimethylamine): 96 ng/day; NDEA (N-Nitrosodiethylamine): 26.5 ng/day."',
-  citations: [
-    {
-      source_id: "fda-nitrosamines-rev1",
-      document_title:
-        "Control of Nitrosamine Impurities in Human Drugs: Guidance for Industry (Rev 1)",
-      section: "Section III. Acceptable Intake Limits",
-      page: 10,
-      quoted_evidence:
-        "The recommended acceptable intake (AI) limits for nitrosamines in human pharmaceuticals are: NDMA (N-Nitrosodimethylamine): 96 ng/day; NDEA (N-Nitrosodiethylamine): 26.5 ng/day.",
-    },
-    {
-      source_id: "fda-nitrosamines-rev1",
-      document_title:
-        "Control of Nitrosamine Impurities in Human Drugs: Guidance for Industry (Rev 1)",
-      section: "Section IV. Root Causes and Excipient Risk Factors",
-      page: 14,
-      quoted_evidence:
-        "Nitrites may be present as trace impurities in commonly used excipients, including microcrystalline cellulose, povidone, crospovidone, and pregelatinized starch, which can facilitate nitrosamine formation in the finished dosage form.",
-    },
-  ],
-  evidence_gaps: [
-    "No conflicting limits identified in approved FDA corpus. EMA limits match FDA (96 ng/day for NDMA). Long-term stability under elevated temperature remains subject to confirmation in Stage 2 DOE.",
-  ],
-  confidence_score: 0.96,
-  verified: true,
-  retrieved_evidence: [
-    {
-      chunk_id: "fda-nitro-chunk-01",
-      source_id: "fda-nitrosamines-rev1",
-      document_title:
-        "Control of Nitrosamine Impurities in Human Drugs: Guidance for Industry (Rev 1)",
-      section: "Section III. Acceptable Intake Limits",
-      page: 10,
-      text: "The recommended acceptable intake (AI) limits for nitrosamines in human pharmaceuticals are: NDMA (N-Nitrosodimethylamine): 96 ng/day; NDEA (N-Nitrosodiethylamine): 26.5 ng/day; NMBA: 96 ng/day.",
-      similarity_score: 0.95,
-    },
-    {
-      chunk_id: "fda-nitro-chunk-02",
-      source_id: "fda-nitrosamines-rev1",
-      document_title:
-        "Control of Nitrosamine Impurities in Human Drugs: Guidance for Industry (Rev 1)",
-      section: "Section IV. Root Causes and Excipient Risk Factors",
-      page: 14,
-      text: "Nitrites may be present as trace impurities in commonly used excipients, including microcrystalline cellulose, povidone, crospovidone, and pregelatinized starch, which can facilitate nitrosamine formation in the finished dosage form.",
-      similarity_score: 0.89,
-    },
-  ],
-  workflow_run_id: "RUN-2026-101",
-  review_status: "PENDING_EXPERT_REVIEW",
-};
-
-function buildSamplePdfBytes(pages: string[]): Uint8Array {
-  const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-  const pageIds = pages.map((_, i) => 4 + 2 * i);
-  const objects: Record<number, string> = {
-    1: "<< /Type /Catalog /Pages 2 0 R >>",
-    2: `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pages.length} >>`,
-    3: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-  };
-  pages.forEach((text, i) => {
-    const pageId = pageIds[i];
-    const contentId = pageId + 1;
-    const lines = text.split("\n");
-    const stream = `BT /F1 11 Tf 72 720 Td 14 TL\n${lines.map((l) => `(${esc(l)}) Tj T*`).join("\n")}\nET`;
-    objects[pageId] =
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] ` +
-      `/Resources << /Font << /F1 3 0 R >> >> /Contents ${contentId} 0 R >>`;
-    objects[contentId] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
-  });
-  let out = "%PDF-1.4\n";
-  const offsets: Record<number, number> = {};
-  const maxObj = Math.max(...Object.keys(objects).map(Number));
-  for (let n = 1; n <= maxObj; n++) {
-    offsets[n] = out.length;
-    out += `${n} 0 obj\n${objects[n]}\nendobj\n`;
-  }
-  const xrefAt = out.length;
-  const size = maxObj + 1;
-  out += `xref\n0 ${size}\n0000000000 65535 f \n`;
-  for (let n = 1; n < size; n++) {
-    out += `${String(offsets[n]).padStart(10, "0")} 00000 n \n`;
-  }
-  out += `trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`;
-  return new TextEncoder().encode(out);
-}
-
-const FALLBACK_PROJECT_DOCS: Record<string, ProjectDocument[]> = {
-  "PRJ-001": [
-    {
-      document_id: "doc-ich-q3dr2",
-      source_id: "ICH-Q3DR2",
-      title: "Guideline for Elemental Impurities Q3D(R2)",
-      authority: "ICH",
-      attribution:
-        "© ICH. Reproduced in accordance with ICH copyright terms; no ICH endorsement implied.",
-      latest_version: {
-        version_id: "ver-q3dr2-v1",
-        version_number: 1,
-        version_label: "Q3D(R2)",
-        sha256: "2dc1fdcd014ba306d106cc29f7e51d2e3d06b57e6a9c6d63c485549a7bf85bc3",
-        byte_size: 1556075,
-        page_count: 88,
-        text_layer: "yes",
-        extraction_method: "pypdf",
-        extraction_status: "ok",
-        extraction_notes: [],
-      },
-      versions: [
-        {
-          version_id: "ver-q3dr2-v1",
-          version_number: 1,
-          version_label: "Q3D(R2)",
-          sha256: "2dc1fdcd014ba306d106cc29f7e51d2e3d06b57e6a9c6d63c485549a7bf85bc3",
-          byte_size: 1556075,
-          page_count: 88,
-          text_layer: "yes",
-          extraction_method: "pypdf",
-          extraction_status: "ok",
-          extraction_notes: [],
-        },
-      ],
-      preview_text:
-        "[Page 1] INTERNATIONAL COUNCIL FOR HARMONISATION OF TECHNICAL REQUIREMENTS FOR PHARMACEUTICALS FOR HUMAN USE — ICH HARMONISED GUIDELINE FOR ELEMENTAL IMPURITIES Q3D(R2). Oral PDE limits: Cd 5 ug/day, Pb 5 ug/day, As 15 ug/day, Hg 30 ug/day.",
-    },
-    {
-      document_id: "doc-fda-pv-2011",
-      source_id: "FDA-PV-2011",
-      title: "Process Validation: General Principles and Practices",
-      authority: "FDA",
-      attribution: "U.S. Food and Drug Administration (FDA) public domain guidance (Jan 2011).",
-      latest_version: {
-        version_id: "ver-pv-v1",
-        version_number: 1,
-        version_label: "Final (Jan 2011)",
-        sha256: "9b415a0214a56f9e3685161f7736e2c229a315457ab87b8875b4d2a3d7f0c945",
-        byte_size: 380828,
-        page_count: 22,
-        text_layer: "yes",
-        extraction_method: "pypdf",
-        extraction_status: "ok",
-        extraction_notes: [],
-      },
-      versions: [
-        {
-          version_id: "ver-pv-v1",
-          version_number: 1,
-          version_label: "Final (Jan 2011)",
-          sha256: "9b415a0214a56f9e3685161f7736e2c229a315457ab87b8875b4d2a3d7f0c945",
-          byte_size: 380828,
-          page_count: 22,
-          text_layer: "yes",
-          extraction_method: "pypdf",
-          extraction_status: "ok",
-          extraction_notes: [],
-        },
-      ],
-      preview_text:
-        "[Page 1] Guidance for Industry: Process Validation: General Principles and Practices. Stage 1 Process Design, Stage 2 Process Qualification, Stage 3 Continued Process Verification.",
-    },
-  ],
-  "PRJ-002": [
-    {
-      document_id: "doc-ich-m9",
-      source_id: "ICH-M9",
-      title: "Biopharmaceutics Classification System-based Biowaivers M9",
-      authority: "ICH",
-      attribution:
-        "© ICH. Reproduced in accordance with ICH copyright terms; no ICH endorsement implied.",
-      latest_version: {
-        version_id: "ver-m9-v1",
-        version_number: 1,
-        version_label: "Step 4 (Nov 2019)",
-        sha256: "418c8192dc2b8c32a9d2224322a830242d1a0a835a1d994162c7b111600eb9eb",
-        byte_size: 227095,
-        page_count: 19,
-        text_layer: "yes",
-        extraction_method: "pypdf",
-        extraction_status: "ok",
-        extraction_notes: [],
-      },
-      versions: [
-        {
-          version_id: "ver-m9-v1",
-          version_number: 1,
-          version_label: "Step 4 (Nov 2019)",
-          sha256: "418c8192dc2b8c32a9d2224322a830242d1a0a835a1d994162c7b111600eb9eb",
-          byte_size: 227095,
-          page_count: 19,
-          text_layer: "yes",
-          extraction_method: "pypdf",
-          extraction_status: "ok",
-          extraction_notes: [],
-        },
-      ],
-      preview_text:
-        "[Page 1] ICH Harmonised Guideline: Biopharmaceutics Classification System-based Biowaivers M9. High solubility and high permeability BCS Class I and III criteria.",
-    },
-  ],
-};
 
 const GOLDEN_SAMPLE_QUESTIONS: Record<string, { label: string; query: string }[]> = {
   "PRJ-001": [
@@ -414,6 +81,19 @@ function resolveCitationProvenance(
   authority: string;
 } {
   const normalized = cit.source_id.toLowerCase();
+
+  // A citation from the server names the exact version it quotes. That version, not the
+  // document's latest one, is what the reader must see next to the quote.
+  if (cit.sha256 && cit.version_number != null) {
+    const owner = projectDocs.find((d) => d.source_id.toLowerCase() === normalized);
+    return {
+      versionLabel: `v${cit.version_number}${cit.version_label ? ` (${cit.version_label})` : ""}`,
+      sha256: cit.sha256,
+      attribution: cit.attribution || "Attribution not recorded for this source.",
+      authority: owner?.authority ?? "Approved source",
+    };
+  }
+
   const matchedProjectDoc = projectDocs.find(
     (d) =>
       d.source_id.toLowerCase() === normalized ||
@@ -448,10 +128,15 @@ function resolveCitationProvenance(
 
   return {
     versionLabel: cit.version_label || "v1 (Approved Baseline)",
-    sha256: cit.sha256 || "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    sha256: cit.sha256 || "not recorded",
     attribution: cit.attribution || "Approved regulatory source registry.",
     authority: cit.source_id.toUpperCase().startsWith("ICH") ? "ICH" : "FDA",
   };
+}
+
+/** "10" for a one-page quote or passage, "10–11" when it runs across a page break. */
+function pageLabel(page: number, pageEnd?: number | null): string {
+  return pageEnd != null && pageEnd > page ? `${page}–${pageEnd}` : String(page);
 }
 
 function escapeCsvCell(value: string): string {
@@ -465,12 +150,11 @@ export function App(): React.ReactElement {
   const [session, setSession] = useState<OidcSession | null>(() => createDevSession("scientist"));
   const [loginRole, setLoginRole] = useState<UserRole>("scientist");
   const [apiHealth, setApiHealth] = useState<"checking" | "ok" | "offline">("checking");
-  const [sources, setSources] = useState<DocumentMetadata[]>(FALLBACK_SOURCES);
+  const [sources, setSources] = useState<DocumentMetadata[]>([]);
 
-  // Document Library UI state (S2-05)
-  const [projectDocs, setProjectDocs] = useState<ProjectDocument[]>(
-    FALLBACK_PROJECT_DOCS["PRJ-001"]
-  );
+  // Document Library UI state (S2-05). Only what the API returns is shown; a failure is an error.
+  const [projectDocs, setProjectDocs] = useState<ProjectDocument[]>([]);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
   const [uploadSourceId, setUploadSourceId] = useState<string>("ICH-Q3DR2");
   const [uploadVersionLabel, setUploadVersionLabel] = useState<string>("Revision 2");
   const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null);
@@ -482,37 +166,42 @@ export function App(): React.ReactElement {
 
   // Research & Strategy state (S2-08)
   const [queryText, setQueryText] = useState<string>(
-    "What are the acceptable intake limits for NDMA and NDEA according to FDA?"
+    "What is the acceptable intake limit for NDMA?"
   );
   const [publisherFilter, setPublisherFilter] = useState<string>("ALL");
   const [topK, setTopK] = useState<number>(3);
   const [strictCitationMode, setStrictCitationMode] = useState<boolean>(true);
-  const [researchResult, setResearchResult] = useState<ResearchResponse | null>(
-    DEFAULT_PREVIEW_RESULT
-  );
+  // Nothing is shown until the API has answered a question the user asked.
+  const [researchResult, setResearchResult] = useState<ResearchResponse | null>(null);
+  const [queryError, setQueryError] = useState<string | null>(null);
   const [selectedCitationIndex, setSelectedCitationIndex] = useState<number>(0);
   const [queryLoading, setQueryLoading] = useState<boolean>(false);
 
-  // Human-Review Gate state (S2-10)
-  const [activeWorkflowRunId, setActiveWorkflowRunId] = useState<string>("RUN-2026-101");
+  // Human-Review Gate state (S2-10). The run id is issued by the server with the answer.
+  const [activeWorkflowRunId, setActiveWorkflowRunId] = useState<string>("");
   const [answerReviewStatus, setAnswerReviewStatus] =
     useState<ReviewGateStatus>("PENDING_EXPERT_REVIEW");
-  const [reviewRationale, setReviewRationale] = useState<string>(
-    "All cited limits match FDA-2020-D-1530 Rev 1 (p. 10) and ICH Q3D(R2) (p. 12)."
-  );
-  const [reviewHistory, setReviewHistory] =
-    useState<ReviewHistoryEntry[]>(INITIAL_REVIEW_HISTORY);
+  // Empty on purpose: a reviewer has to write their own reason.
+  const [reviewRationale, setReviewRationale] = useState<string>("");
+  const [reviewHistory, setReviewHistory] = useState<ReviewHistoryEntry[]>([]);
   const [reviewFeedback, setReviewFeedback] = useState<{
     type: "success" | "error";
     message: string;
   } | null>(null);
 
   // Audit Viewer Filter state (S1-12 & S2-11)
-  const [auditLogs, setAuditLogs] = useState<AuditRecord[]>(INITIAL_AUDIT_LOGS);
+  const [auditLogs, setAuditLogs] = useState<AuditRecord[]>([]);
+  const [auditError, setAuditError] = useState<string | null>(null);
   const [filterProject, setFilterProject] = useState<string>("ALL");
   const [filterAction, setFilterAction] = useState<string>("ALL");
   const [filterActor, setFilterActor] = useState<string>("");
   const [filterWorkflowRun, setFilterWorkflowRun] = useState<string>("");
+
+  // The page starts with a placeholder token ("dev-jwt-...") that the API rejects. It is swapped
+  // for a signed one by the effect below; until then nothing should be asked of the API.
+  const hasSignedToken = !!session?.accessToken && !session.accessToken.startsWith("dev-jwt-");
+  // The server only accepts decisions from the reviewer role; the buttons follow the same rule.
+  const canReview = session?.role === "reviewer";
 
   // Automatically acquire a genuine signed dev JWT from the API backend
   useEffect(() => {
@@ -553,7 +242,7 @@ export function App(): React.ReactElement {
   }, [session?.accessToken]);
 
   useEffect(() => {
-    if (activeTab !== "audit" || session?.role !== "admin" || !session?.accessToken) return;
+    if (activeTab !== "audit" || session?.role !== "admin" || !hasSignedToken) return;
     let mounted = true;
     fetchAuditEvents(session.accessToken, {
       projectId: filterProject,
@@ -564,8 +253,9 @@ export function App(): React.ReactElement {
       pageSize: 50,
     })
       .then((res) => {
-        if (!mounted || !res.items || res.items.length === 0) return;
-        const mapped: AuditRecord[] = res.items.map((it) => {
+        if (!mounted) return;
+        setAuditError(null);
+        const mapped: AuditRecord[] = (res.items ?? []).map((it) => {
           const detailsObj =
             typeof it.details === "object" && it.details !== null
               ? (it.details as Record<string, unknown>)
@@ -591,8 +281,10 @@ export function App(): React.ReactElement {
         });
         setAuditLogs(mapped);
       })
-      .catch(() => {
-        // Fall back to local state if backend audit endpoint is offline
+      .catch((err: unknown) => {
+        if (!mounted) return;
+        setAuditLogs([]);
+        setAuditError(err instanceof Error ? err.message : "Could not load the audit log");
       });
 
     return () => {
@@ -610,41 +302,32 @@ export function App(): React.ReactElement {
 
   useEffect(() => {
     let mounted = true;
-    const fallback = FALLBACK_PROJECT_DOCS[selectedProject] || [];
-    if (!session?.accessToken) {
-      setProjectDocs(fallback);
+    setLibraryError(null);
+    // Until the page has swapped its placeholder token for a signed one there is nothing to ask.
+    if (!hasSignedToken) {
+      setProjectDocs([]);
       return;
     }
-    fetchProjectDocuments(selectedProject, session.accessToken)
+    fetchProjectDocuments(selectedProject, session?.accessToken)
       .then((docs) => {
-        if (mounted) {
-          setProjectDocs(docs.length > 0 ? docs : fallback);
-        }
+        if (mounted) setProjectDocs(docs);
       })
-      .catch(() => {
-        if (mounted) setProjectDocs(fallback);
+      .catch((err: unknown) => {
+        if (!mounted) return;
+        setProjectDocs([]);
+        setLibraryError(err instanceof Error ? err.message : "Could not load the documents");
       });
     return () => {
       mounted = false;
     };
   }, [selectedProject, session?.accessToken]);
 
-  async function handleDocumentUpload(useSampleRevision: boolean) {
+  async function handleDocumentUpload() {
+    if (!selectedPdfFile) return;
     setUploadLoading(true);
     setUploadFeedback(null);
     try {
-      let fileBytes: ArrayBuffer | Uint8Array;
-      if (!useSampleRevision && selectedPdfFile) {
-        fileBytes = await selectedPdfFile.arrayBuffer();
-      } else {
-        const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
-        fileBytes = buildSamplePdfBytes([
-          `Regulatory Guidance Source ${uploadSourceId} - Project ${selectedProject}`,
-          `Version Label: ${uploadVersionLabel || "Revision Update"} (${stamp} UTC)`,
-          "Page 1: Cadmium oral permitted daily exposure 5 ug/day; NDMA AI limit 96 ng/day.",
-          "Page 2: Validated excipient control strategy and continued process verification.",
-        ]);
-      }
+      const fileBytes: ArrayBuffer = await selectedPdfFile.arrayBuffer();
       const res = await uploadSourceDocument({
         sourceId: uploadSourceId,
         projectId: selectedProject,
@@ -673,151 +356,58 @@ export function App(): React.ReactElement {
     }
   }
 
-  async function handleRunQuery(e: React.FormEvent) {
-    e.preventDefault();
-    if (!queryText.trim()) return;
-    setQueryLoading(true);
-    setSelectedCitationIndex(0);
+  // An answer belongs to the project it was asked in, so changing project clears it.
+  useEffect(() => {
+    setResearchResult(null);
+    setQueryError(null);
+    setActiveWorkflowRunId("");
     setAnswerReviewStatus("PENDING_EXPERT_REVIEW");
     setReviewFeedback(null);
-    const generatedRunId = `RUN-${selectedProject}-${Date.now().toString().slice(-4)}`;
-    setActiveWorkflowRunId(generatedRunId);
+  }, [selectedProject]);
 
+  async function handleRunQuery(e: React.FormEvent) {
+    e.preventDefault();
+    const question = queryText.trim();
+    if (!question) return;
+    setQueryLoading(true);
+    setQueryError(null);
+    setReviewFeedback(null);
     try {
       const response = await submitResearchQuery(
         {
-          query: queryText,
+          query: question,
           project_id: selectedProject,
-          publisher_filter: publisherFilter === "ALL" ? null : [publisherFilter],
           top_k: topK,
           strict_citation_mode: strictCitationMode,
         },
         session?.accessToken
       );
-      setResearchResult({
-        ...response,
-        workflow_run_id: response.workflow_run_id || generatedRunId,
-        review_status: "PENDING_EXPERT_REVIEW",
-      });
-    } catch {
-      const qLower = queryText.toLowerCase();
-      if (qLower.includes("q1a") || qLower.includes("xyz-999") || qLower.includes("swallow")) {
-        setResearchResult({
-          query: queryText,
-          answer:
-            "No verified evidence was found in the approved regulatory and scientific sources (FDA, EMA, ICH) matching this query. To ensure compliance and prevent hallucination, an ungrounded response is withheld.",
-          citations: [],
-          evidence_gaps: [
-            `No approved regulatory literature found for query: '${queryText}' in current source registry (or requested source is HELD per ADR-002).`,
-          ],
-          confidence_score: 0.0,
-          verified: false,
-          retrieved_evidence: [],
-          workflow_run_id: generatedRunId,
-          review_status: "PENDING_EXPERT_REVIEW",
-        });
-      } else if (
-        qLower.includes("elemental") ||
-        qLower.includes("q3d") ||
-        qLower.includes("cadmium")
-      ) {
-        setResearchResult({
-          query: queryText,
-          answer:
-            'According to ICH Guideline Q3D(R2) on Elemental Impurities (Section 5.1 Element Classification & Oral PDEs, p. 12):\n"Class 1 elements are human toxicants that have limited or no use in the manufacture of pharmaceuticals. The permitted daily exposure (PDE) limits for Class 1 elemental impurities administered by the oral route are: Cadmium (Cd): 5.0 µg/day; Lead (Pb): 5.0 µg/day; Inorganic Arsenic (As): 15.0 µg/day; Inorganic Mercury (Hg): 30.0 µg/day."',
-          citations: [
-            {
-              source_id: "ich-q3d-elemental-impurities",
-              document_title: "ICH Guideline Q3D(R2) on Elemental Impurities",
-              section: "Section 5.1 Element Classification & Oral PDEs",
-              page: 12,
-              quoted_evidence:
-                "Class 1 elements are human toxicants that have limited or no use in the manufacture of pharmaceuticals. The permitted daily exposure (PDE) limits for Class 1 elemental impurities administered by the oral route are: Cadmium (Cd): 5.0 µg/day; Lead (Pb): 5.0 µg/day; Inorganic Arsenic (As): 15.0 µg/day; Inorganic Mercury (Hg): 30.0 µg/day.",
-            },
-          ],
-          evidence_gaps: [],
-          confidence_score: 0.94,
-          verified: true,
-          retrieved_evidence: [
-            {
-              chunk_id: "ich-q3d-chunk-01",
-              source_id: "ich-q3d-elemental-impurities",
-              document_title: "ICH Guideline Q3D(R2) on Elemental Impurities",
-              section: "Section 5.1 Element Classification & Oral PDEs",
-              page: 12,
-              text: "Class 1 elements are human toxicants that have limited or no use in the manufacture of pharmaceuticals. The permitted daily exposure (PDE) limits for Class 1 elemental impurities administered by the oral route are: Cadmium (Cd): 5.0 µg/day; Lead (Pb): 5.0 µg/day; Inorganic Arsenic (As): 15.0 µg/day; Inorganic Mercury (Hg): 30.0 µg/day.",
-              similarity_score: 0.94,
-            },
-          ],
-          workflow_run_id: generatedRunId,
-          review_status: "PENDING_EXPERT_REVIEW",
-        });
-      } else {
-        setResearchResult({
-          query: queryText,
-          answer:
-            'According to Control of Nitrosamine Impurities in Human Drugs: Guidance for Industry (Rev 1) (Section III. Acceptable Intake Limits, p. 10):\n"The recommended acceptable intake (AI) limits for nitrosamines in human pharmaceuticals are: NDMA (N-Nitrosodimethylamine): 96 ng/day; NDEA (N-Nitrosodiethylamine): 26.5 ng/day."',
-          citations: [
-            {
-              source_id: "fda-nitrosamines-rev1",
-              document_title:
-                "Control of Nitrosamine Impurities in Human Drugs: Guidance for Industry (Rev 1)",
-              section: "Section III. Acceptable Intake Limits",
-              page: 10,
-              quoted_evidence:
-                "The recommended acceptable intake (AI) limits for nitrosamines in human pharmaceuticals are: NDMA (N-Nitrosodimethylamine): 96 ng/day; NDEA (N-Nitrosodiethylamine): 26.5 ng/day.",
-            },
-            {
-              source_id: "fda-nitrosamines-rev1",
-              document_title:
-                "Control of Nitrosamine Impurities in Human Drugs: Guidance for Industry (Rev 1)",
-              section: "Section IV. Root Causes and Excipient Risk Factors",
-              page: 14,
-              quoted_evidence:
-                "Nitrites may be present as trace impurities in commonly used excipients, including microcrystalline cellulose, povidone, crospovidone, and pregelatinized starch, which can facilitate nitrosamine formation in the finished dosage form.",
-            },
-          ],
-          evidence_gaps: qLower.includes("stability")
-            ? [
-                "Specific data regarding 'stability' is not explicitly defined in the retrieved passages.",
-              ]
-            : [],
-          confidence_score: 0.92,
-          verified: true,
-          retrieved_evidence: [
-            {
-              chunk_id: "fda-nitro-chunk-01",
-              source_id: "fda-nitrosamines-rev1",
-              document_title:
-                "Control of Nitrosamine Impurities in Human Drugs: Guidance for Industry (Rev 1)",
-              section: "Section III. Acceptable Intake Limits",
-              page: 10,
-              text: "The recommended acceptable intake (AI) limits for nitrosamines in human pharmaceuticals are: NDMA (N-Nitrosodimethylamine): 96 ng/day; NDEA (N-Nitrosodiethylamine): 26.5 ng/day; NMBA: 96 ng/day.",
-              similarity_score: 0.95,
-            },
-            {
-              chunk_id: "fda-nitro-chunk-02",
-              source_id: "fda-nitrosamines-rev1",
-              document_title:
-                "Control of Nitrosamine Impurities in Human Drugs: Guidance for Industry (Rev 1)",
-              section: "Section IV. Root Causes and Excipient Risk Factors",
-              page: 14,
-              text: "Nitrites may be present as trace impurities in commonly used excipients, including microcrystalline cellulose, povidone, crospovidone, and pregelatinized starch, which can facilitate nitrosamine formation in the finished dosage form.",
-              similarity_score: 0.89,
-            },
-          ],
-          workflow_run_id: generatedRunId,
-          review_status: "PENDING_EXPERT_REVIEW",
-        });
-      }
+      setSelectedCitationIndex(0);
+      setResearchResult(response);
+      setActiveWorkflowRunId(response.workflow_run_id ?? "");
+      setAnswerReviewStatus(response.review_status ?? "PENDING_EXPERT_REVIEW");
+    } catch (err) {
+      // No canned answer: a question that fails shows its error and nothing else.
+      setResearchResult(null);
+      setActiveWorkflowRunId("");
+      setQueryError(err instanceof Error ? err.message : "The question could not be answered");
     } finally {
       setQueryLoading(false);
     }
   }
 
-  // S2-10: Human-Review Gate Decision Handler (Approve, Reject, or Request More Evidence)
+  // S2-10: Human-Review Gate. The server records the decision against the stored answer, takes the
+  // reviewer from the sign-in token and the cited sources from the stored run. Nothing is shown as
+  // recorded unless the server says it was.
   async function handleReviewDecision(decision: ReviewDecisionAction) {
     if (!session) return;
+    if (!activeWorkflowRunId) {
+      setReviewFeedback({
+        type: "error",
+        message: "Ask a question first: a decision is recorded against a stored answer.",
+      });
+      return;
+    }
     const trimmedRationale = reviewRationale.trim();
     if (!trimmedRationale) {
       setReviewFeedback({
@@ -827,71 +417,29 @@ export function App(): React.ReactElement {
       });
       return;
     }
-
-    const citedSources =
-      researchResult && researchResult.citations.length > 0
-        ? researchResult.citations.map((c) => `${c.source_id} (p. ${c.page})`)
-        : ["fda-nitrosamines-rev1 (v1, p. 10)", "ICH-Q3DR2 (v1, p. 12)"];
-
-    const timestamp = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
-    const auditEventId = `AUD-${Date.now().toString().slice(-5)}`;
-
-    let recordedEntry: ReviewHistoryEntry = {
-      review_id: `REV-${Date.now().toString().slice(-5)}`,
-      workflow_run_id: activeWorkflowRunId,
-      project_id: selectedProject,
-      decision,
-      rationale: trimmedRationale,
-      reviewer_email: session.email,
-      reviewer_role: session.role,
-      cited_sources: citedSources,
-      timestamp,
-      audit_event_id: auditEventId,
-    };
-
+    setReviewFeedback(null);
     try {
-      const apiEntry = await submitReviewDecision(
+      const entry = await submitReviewDecision(
         {
           workflow_run_id: activeWorkflowRunId,
           project_id: selectedProject,
           decision,
           rationale: trimmedRationale,
-          query: queryText,
-          cited_sources: citedSources,
         },
         session.accessToken
       );
-      recordedEntry = apiEntry;
-    } catch {
-      // Keep local recordedEntry when S2-09 review endpoint is in standalone/preview mode
+      setAnswerReviewStatus(decision);
+      setReviewHistory((prev) => [entry, ...prev]);
+      setReviewFeedback({
+        type: "success",
+        message: `Recorded ${decision} for ${entry.workflow_run_id} (audit event ${entry.audit_event_id}).`,
+      });
+    } catch (err) {
+      setReviewFeedback({
+        type: "error",
+        message: err instanceof Error ? err.message : "The review decision was not recorded",
+      });
     }
-
-    setAnswerReviewStatus(decision);
-    setReviewHistory((prev) => [recordedEntry, ...prev]);
-
-    const actionMap: Record<ReviewDecisionAction, string> = {
-      APPROVED: "ANSWER_REVIEW_APPROVED",
-      REJECTED: "ANSWER_REVIEW_REJECTED",
-      EVIDENCE_REQUESTED: "ANSWER_EVIDENCE_REQUESTED",
-    };
-
-    const newAuditEntry: AuditRecord = {
-      id: recordedEntry.audit_event_id,
-      timestamp: recordedEntry.timestamp,
-      actor: recordedEntry.reviewer_email,
-      role: session.role,
-      project: selectedProject,
-      workflowRunId: activeWorkflowRunId,
-      action: actionMap[decision],
-      resource: activeWorkflowRunId,
-      details: `workflow_run_id=${activeWorkflowRunId} | decision=${decision} | sources=[${citedSources.join(", ")}] | rationale=${trimmedRationale}`,
-    };
-    setAuditLogs((prev) => [newAuditEntry, ...prev]);
-
-    setReviewFeedback({
-      type: "success",
-      message: `Recorded ${decision} for workflow ${activeWorkflowRunId} (Audit Event: ${recordedEntry.audit_event_id}).`,
-    });
   }
 
   // S2-11: Export filtered audit records to RFC-4180 CSV
@@ -1297,7 +845,8 @@ export function App(): React.ReactElement {
                               : "Click to select regulatory PDF or drag & drop"}
                           </strong>
                           <span className="dropzone-sub-text">
-                            Supports PDF, DOCX, and scanned TIFF/PDF (Tesseract OCR)
+                            Text PDFs only. A scanned page with no text is reported, not read (no OCR
+                            yet).
                           </span>
                         </div>
                         <input
@@ -1310,25 +859,21 @@ export function App(): React.ReactElement {
                         />
                       </label>
                       <div className="button-group upload-btn-group">
-                        {selectedPdfFile && (
-                          <button
-                            type="button"
-                            className="btn-primary"
-                            disabled={uploadLoading}
-                            onClick={() => handleDocumentUpload(false)}
-                          >
-                            {uploadLoading ? "Extracting..." : "Upload Selected PDF"}
-                          </button>
-                        )}
                         <button
                           type="button"
                           className="btn-primary"
-                          disabled={uploadLoading}
-                          onClick={() => handleDocumentUpload(true)}
+                          disabled={uploadLoading || !selectedPdfFile}
+                          onClick={() => handleDocumentUpload()}
                         >
-                          {uploadLoading ? "Extracting PDF..." : "Upload Sample Revision PDF"}
+                          {uploadLoading ? "Extracting..." : "Upload Selected PDF"}
                         </button>
                       </div>
+                      <p className="muted">
+                        Uploads need the administrator role. A new version is stored at once, but
+                        it is only searched after it has been indexed (
+                        <code>python scripts/index_chunks.py</code>); until then the previous
+                        version of that document is not searched either.
+                      </p>
                     </div>
                     {uploadFeedback && (
                       <div
@@ -1340,6 +885,15 @@ export function App(): React.ReactElement {
                       </div>
                     )}
                   </div>
+
+                  {libraryError && (
+                    <div className="upload-status error" role="alert">
+                      Could not load this project&apos;s documents: {libraryError}
+                    </div>
+                  )}
+                  {!libraryError && hasSignedToken && projectDocs.length === 0 && (
+                    <p className="muted">No documents are available to this project yet.</p>
+                  )}
 
                   <ul className="source-list" aria-label="Project Ingested Documents">
                     {[...projectDocs]
@@ -1567,6 +1121,8 @@ export function App(): React.ReactElement {
                             aria-label="Publisher Filter"
                             value={publisherFilter}
                             onChange={(e) => setPublisherFilter(e.target.value)}
+                            disabled
+                            title="Not available yet: questions search all of the project's documents"
                           >
                             <option value="ALL">All Approved Authorities (FDA, ICH, EMA)</option>
                             <option value="FDA">FDA Only</option>
@@ -1594,20 +1150,49 @@ export function App(): React.ReactElement {
                           Strict Zero-Hallucination Mode
                         </label>
                       </div>
-                      <button type="submit" className="btn-primary" disabled={queryLoading}>
+                      <button
+                        type="submit"
+                        className="btn-primary"
+                        disabled={queryLoading || !hasSignedToken}
+                        title={hasSignedToken ? undefined : "Waiting for the API to sign you in"}
+                      >
                         {queryLoading ? "Retrieving Evidence..." : "Run Grounded Query"}
                       </button>
                     </div>
                   </form>
 
+                  {!hasSignedToken && (
+                    <div className="upload-status error" role="alert">
+                      Not signed in to the API. Questions need a signed token: start the API with
+                      AUTH_MODE=dev (see the README), then reload this page.
+                    </div>
+                  )}
+                  {queryError && (
+                    <div className="upload-status error" role="alert">
+                      {queryError}
+                    </div>
+                  )}
+
                   {researchResult && (
                     <div className="answer-box" aria-live="polite">
                       {/* Decision D9 & NFR-12 Review Status Banner */}
+                      {researchResult.data_source === "built_in_sample" && (
+                        <div className="upload-status error" role="alert">
+                          SAMPLE DATA: this answer comes from invented sample passages, not from the
+                          project&apos;s documents. Do not treat it as evidence.
+                        </div>
+                      )}
                       <div className="expert-review-banner" role="note">
                         {renderReviewStatusBadge(answerReviewStatus)}
                         <span className="expert-review-note">
-                          Workflow Run: <code>{activeWorkflowRunId}</code> — Answers cannot be
-                          marked reviewed without an audited human sign-off event.
+                          Workflow Run: <code>{activeWorkflowRunId || "—"}</code> — Answers cannot
+                          be marked reviewed without an audited human sign-off event.
+                          {researchResult.answer_mode && (
+                            <>
+                              {" "}
+                              Quotes chosen by: <code>{researchResult.answer_mode}</code>.
+                            </>
+                          )}
                         </span>
                       </div>
 
@@ -1620,11 +1205,16 @@ export function App(): React.ReactElement {
                           >
                             {researchResult.verified
                               ? `✓ GROUNDED IN ${researchResult.citations.length} CITATION(S)`
-                              : "⚠ UNSUPPORTED / WITHHELD (FAIL-CLOSED)"}
+                              : researchResult.citations.length > 0
+                                ? "⚠ PARTLY UNVERIFIED: some quotes were removed (see the gaps below)"
+                                : "⚠ UNSUPPORTED / WITHHELD (FAIL-CLOSED)"}
                           </span>
                           <span className="hash-code">Project Context: {selectedProject}</span>
                         </div>
-                        <span className="lexical-score-pill" title="Word-overlap retrieval score">
+                        <span
+                          className="lexical-score-pill"
+                          title="Share of the question's distinctive words found in the quoted text. A coverage figure, not a probability that the answer is right."
+                        >
                           Lexical Overlap Score:{" "}
                           {(researchResult.confidence_score * 100).toFixed(0)}%
                         </span>
@@ -1647,9 +1237,9 @@ export function App(): React.ReactElement {
                                       : "citation-badge-btn"
                                   }
                                   onClick={() => setSelectedCitationIndex(idx)}
-                                  title={`${cit.document_title} (${cit.section}, p. ${cit.page})`}
+                                  title={`${cit.document_title} (${cit.section}, p. ${pageLabel(cit.page, cit.page_end)})`}
                                 >
-                                  [{idx + 1}] {cit.source_id} (p. {cit.page})
+                                  [{idx + 1}] {cit.source_id} (p. {pageLabel(cit.page, cit.page_end)})
                                 </button>
                               ))}
                             </div>
@@ -1694,7 +1284,7 @@ export function App(): React.ReactElement {
                                       <span className="publisher-tag">{prov.authority}</span>
                                     </div>
                                     <div className="citation-loc">
-                                      {cit.section} — <strong>Page {cit.page}</strong> | Version:{" "}
+                                      {cit.section} — <strong>Page {pageLabel(cit.page, cit.page_end)}</strong> | Version:{" "}
                                       <code>{prov.versionLabel}</code>
                                     </div>
                                     <blockquote>
@@ -1738,7 +1328,7 @@ export function App(): React.ReactElement {
                                   <div>
                                     <span>Section &amp; Page:</span>{" "}
                                     <strong>
-                                      {activeCitation.section} (Page {activeCitation.page})
+                                      {activeCitation.section} (Page {pageLabel(activeCitation.page, activeCitation.page_end)})
                                     </strong>
                                   </div>
                                   <div>
@@ -1804,8 +1394,7 @@ export function App(): React.ReactElement {
                                 <li key={chunk.chunk_id} className="retrieved-chunk-item">
                                   <div className="retrieved-chunk-header">
                                     <span>
-                                      <strong>{chunk.document_title}</strong> — {chunk.section} (p.{" "}
-                                      {chunk.page})
+                                      <strong>{chunk.document_title}</strong> — {chunk.section} (p. {pageLabel(chunk.page, chunk.page_end)})
                                     </span>
                                     <code className="hash-code">
                                       Chunk: {chunk.chunk_id} | Score:{" "}
@@ -1838,10 +1427,17 @@ export function App(): React.ReactElement {
                           onChange={(e) => setReviewRationale(e.target.value)}
                           placeholder="State scientific/regulatory verification rationale..."
                         />
+                        {!canReview && (
+                          <p className="muted">
+                            Only a reviewer can record a decision. Switch the role in the top bar to
+                            Reviewer (the server checks this too).
+                          </p>
+                        )}
                         <div className="button-group">
                           <button
                             type="button"
                             className="btn-approve"
+                            disabled={!canReview || !activeWorkflowRunId}
                             onClick={() => handleReviewDecision("APPROVED")}
                           >
                             Approve Cited Answer
@@ -1849,6 +1445,7 @@ export function App(): React.ReactElement {
                           <button
                             type="button"
                             className="btn-danger"
+                            disabled={!canReview || !activeWorkflowRunId}
                             onClick={() => handleReviewDecision("REJECTED")}
                           >
                             Reject Answer
@@ -1856,6 +1453,7 @@ export function App(): React.ReactElement {
                           <button
                             type="button"
                             className="btn-warning-action"
+                            disabled={!canReview || !activeWorkflowRunId}
                             onClick={() => handleReviewDecision("EVIDENCE_REQUESTED")}
                           >
                             Request More Evidence
@@ -1885,6 +1483,10 @@ export function App(): React.ReactElement {
                     Trial Verification &amp; Design of Experiments (DOE) — {selectedProject}
                   </h2>
                   <span className="spec-pill">Deterministic DOE · Scipy</span>
+                </div>
+                <div className="upload-status error" role="note">
+                  SAMPLE DATA: the batches below are invented for the interface. Trial verification
+                  and DOE are not part of Sprint 2 and are not connected to any data.
                 </div>
                 <p className="muted">
                   Deterministic statistical evaluation (`scipy` / `statsmodels`) of formulation
@@ -1956,12 +1558,17 @@ export function App(): React.ReactElement {
                   </h2>
                   <span className="spec-pill">S2-10 · NFR-12 · FR-27</span>
                 </div>
+                <div className="upload-status error" role="note">
+                  SAMPLE DATA: this report draft and its trial figures are invented for the
+                  interface. Report drafting is not part of Sprint 2. Review decisions on answers
+                  are recorded on the Research tab.
+                </div>
                 <div className="report-meta-bar">
                   <span>
                     Document: <strong>CTD 3.2.P.2.2 Formulation Development Draft (v1.3)</strong>
                   </span>
                   <span>
-                    Workflow Run: <code>{activeWorkflowRunId}</code>
+                    Workflow Run: <code>{activeWorkflowRunId || "—"}</code>
                   </span>
                   <span>Gate Status: {renderReviewStatusBadge(answerReviewStatus)}</span>
                 </div>
@@ -2002,27 +1609,20 @@ export function App(): React.ReactElement {
                     rows={2}
                     value={reviewRationale}
                     onChange={(e) => setReviewRationale(e.target.value)}
+                    disabled
                   />
+                  <p className="muted">
+                    Not available for report drafts yet. A decision here would be recorded against
+                    the last answer asked on the Research tab, so use the review gate there.
+                  </p>
                   <div className="button-group">
-                    <button
-                      type="button"
-                      className="btn-approve"
-                      onClick={() => handleReviewDecision("APPROVED")}
-                    >
+                    <button type="button" className="btn-approve" disabled>
                       Approve Controlled Draft
                     </button>
-                    <button
-                      type="button"
-                      className="btn-danger"
-                      onClick={() => handleReviewDecision("REJECTED")}
-                    >
+                    <button type="button" className="btn-danger" disabled>
                       Reject Draft
                     </button>
-                    <button
-                      type="button"
-                      className="btn-warning-action"
-                      onClick={() => handleReviewDecision("EVIDENCE_REQUESTED")}
-                    >
+                    <button type="button" className="btn-warning-action" disabled>
                       Request Additional Evidence
                     </button>
                   </div>
@@ -2197,6 +1797,14 @@ export function App(): React.ReactElement {
                       </label>
                     </div>
 
+                    {auditError && (
+                      <div className="upload-status error" role="alert">
+                        Could not load the audit log: {auditError}
+                      </div>
+                    )}
+                    {!auditError && filteredAuditLogs.length === 0 && (
+                      <p className="muted">No audit events match these filters.</p>
+                    )}
                     <table className="data-table">
                       <thead>
                         <tr>

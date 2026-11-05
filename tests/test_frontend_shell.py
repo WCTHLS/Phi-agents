@@ -124,3 +124,36 @@ def test_end_to_end_ui_workflow_contract() -> None:
     assert "submitReviewDecision" in client_ts
     # 5. Reconstruct in Audit Viewer & export CSV
     assert "handleExportAuditCsv" in app_tsx
+
+
+def test_the_ui_has_no_canned_answers_or_hidden_fallbacks() -> None:
+    """The screens show what the API returns, or an error. Nothing invented stands in for either.
+
+    These are the pieces that once made a failed call look like a working answer or a saved review.
+    """
+    app_tsx = (FRONTEND_DIR / "src" / "App.tsx").read_text(encoding="utf-8")
+    client_ts = (FRONTEND_DIR / "src" / "api" / "client.ts").read_text(encoding="utf-8")
+
+    for removed in (
+        "DEFAULT_PREVIEW_RESULT",
+        "FALLBACK_SOURCES",
+        "FALLBACK_PROJECT_DOCS",
+        "INITIAL_REVIEW_HISTORY",
+        "INITIAL_AUDIT_LOGS",
+        "buildSamplePdfBytes",
+        "Upload Sample Revision",
+        "fda-nitrosamines-rev1",  # the canned NDMA/NDEA answer
+        "ich-q3d-elemental-impurities",  # the canned cadmium answer
+    ):
+        assert removed not in app_tsx, f"{removed} is a canned stand-in and must not come back"
+
+    # A question goes to the real project, and the run id comes from the server.
+    assert "project_id: selectedProject" in app_tsx
+    assert "response.workflow_run_id" in app_tsx
+    assert "generatedRunId" not in app_tsx
+    # A failed question or review shows its error instead of an answer or a saved decision.
+    assert "setQueryError(" in app_tsx and "setReviewFeedback(" in app_tsx
+    # The review request carries no question or sources: the server uses the stored run.
+    assert "cited_sources" not in client_ts.split("ReviewDecisionRequest")[1].split("}")[0]
+    # Invented sample sections say so.
+    assert app_tsx.count("SAMPLE DATA") >= 2

@@ -21,8 +21,13 @@ export interface Citation {
   source_id: string;
   document_title: string;
   section: string;
+  /** The page the quote starts on. page_end is set when the quote runs onto another page. */
   page: number;
   quoted_evidence: string;
+  chunk_id?: string | null;
+  page_end?: number | null;
+  version_id?: string | null;
+  version_number?: number | null;
   version_label?: string | null;
   sha256?: string | null;
   attribution?: string | null;
@@ -33,10 +38,13 @@ export interface EvidenceChunk {
   source_id: string;
   document_title: string;
   section: string;
+  /** The first page of the passage; it can run on to page_end. */
   page: number;
+  page_end?: number | null;
   text: string;
   similarity_score: number;
   version_label?: string | null;
+  version_number?: number | null;
   sha256?: string | null;
 }
 
@@ -56,20 +64,23 @@ export interface ResearchResponse {
   confidence_score: number;
   verified: boolean;
   retrieved_evidence: EvidenceChunk[];
+  /** "project_documents": real passages. "built_in_sample": invented, never show as evidence. */
+  data_source?: "project_documents" | "built_in_sample";
   workflow_run_id?: string | null;
   review_status?: ReviewGateStatus | null;
+  /** "quotes-only" (word matching) or the name of the model that picked the quotes. */
+  answer_mode?: string | null;
 }
 
 export type ReviewDecisionAction = "APPROVED" | "REJECTED" | "EVIDENCE_REQUESTED";
 export type ReviewGateStatus = "PENDING_EXPERT_REVIEW" | ReviewDecisionAction;
 
+/** The server looks up the question and cited sources from the stored run, so only these are sent. */
 export interface ReviewDecisionRequest {
   workflow_run_id: string;
   project_id: string;
   decision: ReviewDecisionAction;
   rationale: string;
-  query: string;
-  cited_sources: string[];
 }
 
 export interface ReviewHistoryEntry {
@@ -86,6 +97,23 @@ export interface ReviewHistoryEntry {
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
+/**
+ * An error message that says what the server said ("Not authorized for this project",
+ * "Requires one of the roles: qa, reviewer", "Workflow run not found"), so a refused or failed
+ * request is never shown as success or hidden behind sample data.
+ */
+async function failure(response: Response, what: string): Promise<Error> {
+  let detail = "";
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string") detail = body.detail;
+    else if (Array.isArray(body.detail)) detail = "the request was not valid";
+  } catch {
+    // The reply was not JSON; the status code alone will do.
+  }
+  return new Error(`${what} (${response.status}${detail ? `: ${detail}` : ""})`);
+}
 
 export async function checkHealth(accessToken?: string): Promise<HealthResponse> {
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -128,7 +156,7 @@ export async function submitResearchQuery(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw new Error(`Research query failed (${response.status})`);
+    throw await failure(response, "Question failed");
   }
   return (await response.json()) as ResearchResponse;
 }
@@ -150,7 +178,7 @@ export async function submitReviewDecision(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw new Error(`Review submission failed (${response.status})`);
+    throw await failure(response, "Review decision not recorded");
   }
   return (await response.json()) as ReviewHistoryEntry;
 }
