@@ -13,11 +13,8 @@ import {
   ProjectDocument,
   fetchMyProjects,
   fetchReviewQueue,
-  fetchSourceRegister,
   ProjectInfo,
   ReviewQueue,
-  RegisterEntry,
-  uploadSourceDocument,
 } from "./api/client";
 import {
   createDevSession,
@@ -127,9 +124,6 @@ export function App(): React.ReactElement {
   // Document Library UI state (S2-05). Only what the API returns is shown; a failure is an error.
   const [projectDocs, setProjectDocs] = useState<ProjectDocument[]>([]);
   const [libraryError, setLibraryError] = useState<string | null>(null);
-  const [uploadSourceId, setUploadSourceId] = useState<string>("");
-  // The approved-source register from the API (administrators only); the upload form is built from it.
-  const [register, setRegister] = useState<RegisterEntry[] | null>(null);
   // Review queue (reviewers): the project's stored questions with one review status.
   const [queue, setQueue] = useState<ReviewQueue | null>(null);
   const [queueError, setQueueError] = useState<string | null>(null);
@@ -144,14 +138,6 @@ export function App(): React.ReactElement {
   } | null>(null);
   // The signed-in person's own projects, as the API describes them (names included).
   const [myProjects, setMyProjects] = useState<ProjectInfo[]>([]);
-  const [registerError, setRegisterError] = useState<string | null>(null);
-  const [uploadVersionLabel, setUploadVersionLabel] = useState<string>("Revision 2");
-  const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null);
-  const [uploadLoading, setUploadLoading] = useState<boolean>(false);
-  const [uploadFeedback, setUploadFeedback] = useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
 
   // Research & Strategy state (S2-08)
   const [queryText, setQueryText] = useState<string>(
@@ -211,44 +197,6 @@ export function App(): React.ReactElement {
     if (known) return `${id}: ${known.name}`;
     return session && !session.projectIds.includes(id) ? `${id} — no access` : id;
   };
-
-  useEffect(() => {
-    if (session?.role !== "admin" || !hasSignedToken) {
-      setRegister(null);
-      setRegisterError(null);
-      return;
-    }
-    let mounted = true;
-    fetchSourceRegister(session.accessToken)
-      .then((items) => {
-        if (mounted) {
-          setRegister(items);
-          setRegisterError(null);
-        }
-      })
-      .catch((err) => {
-        if (mounted) {
-          setRegister(null);
-          setRegisterError(err instanceof Error ? err.message : "Could not load the register");
-        }
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [session?.role, session?.accessToken, hasSignedToken]);
-
-  // Offer first the sources already in the selected project, then the other eligible ones, and
-  // held ones last. The chosen source starts at the first of them whenever the project changes.
-  const registerOptions = [...(register ?? [])].sort((a, b) => {
-    const rank = (e: RegisterEntry) =>
-      !e.eligible ? 2 : e.project_ids.includes(selectedProject) ? 0 : 1;
-    return rank(a) - rank(b) || a.source_id.localeCompare(b.source_id);
-  });
-  useEffect(() => {
-    setUploadSourceId(registerOptions[0]?.source_id ?? "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [register, selectedProject]);
-  const chosenSource = registerOptions.find((e) => e.source_id === uploadSourceId);
 
   // Signing in as someone opens the first project they belong to. The project list still shows
   // the others (marked "no access"), so choosing one shows the API refusing it.
@@ -454,40 +402,6 @@ export function App(): React.ReactElement {
       mounted = false;
     };
   }, [selectedProject, session?.accessToken]);
-
-  async function handleDocumentUpload() {
-    if (!selectedPdfFile || !uploadSourceId) return;
-    setUploadLoading(true);
-    setUploadFeedback(null);
-    try {
-      const fileBytes: ArrayBuffer = await selectedPdfFile.arrayBuffer();
-      const res = await uploadSourceDocument({
-        sourceId: uploadSourceId,
-        projectId: selectedProject,
-        fileBytes,
-        versionLabel: uploadVersionLabel,
-        accessToken: session?.accessToken,
-      });
-      setUploadFeedback({
-        type: "success",
-        message: res.already_ingested
-          ? `Already Ingested: ${res.source_id} v${res.version_number} (${res.page_count} pages, status=${res.extraction_status})`
-          : `Ingested ${res.source_id} v${res.version_number} → status: ${res.extraction_status} (${res.page_count} pages, text_layer: ${res.text_layer}, SHA-256: ${res.sha256.slice(0, 16)}...)`,
-      });
-      const updated = await fetchProjectDocuments(selectedProject, session?.accessToken);
-      if (updated.length > 0) {
-        setProjectDocs(updated);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Document upload failed";
-      setUploadFeedback({
-        type: "error",
-        message: msg,
-      });
-    } finally {
-      setUploadLoading(false);
-    }
-  }
 
   // An answer belongs to the project it was asked in, so changing project clears it.
   useEffect(() => {
@@ -914,147 +828,9 @@ export function App(): React.ReactElement {
                     <span className="spec-pill">S2-05 · ADR-007</span>
                   </div>
                   <p className="muted">
-                    Upload PDF versions into <strong>{selectedProject}</strong>, inspect extraction
-                    status, text-layer uncertainty flags, extracted text previews, and version
-                    history.
+                    Extraction status, text-layer uncertainty flags, extracted text previews and
+                    version history for <strong>{selectedProject}</strong>.
                   </p>
-
-                  <div className="upload-panel" aria-label="Document Upload Form">
-                    <div className="upload-panel-header">
-                      <h3>Ingest Document Version</h3>
-                      <span className="role-pill">Admin Role per ADR-007</span>
-                    </div>
-                    <div className="upload-grid">
-                      <label>
-                        Approved Source ID:
-                        <select
-                          aria-label="Select Approved Source ID"
-                          value={uploadSourceId}
-                          onChange={(e) => setUploadSourceId(e.target.value)}
-                          disabled={registerOptions.length === 0}
-                        >
-                          {registerOptions.length === 0 && (
-                            <option value="">
-                              {session?.role !== "admin"
-                                ? "Sign in as the administrator to upload"
-                                : registerError
-                                  ? "Register unavailable"
-                                  : "Loading the register..."}
-                            </option>
-                          )}
-                          {registerOptions.map((entry) => (
-                            <option key={entry.source_id} value={entry.source_id}>
-                              {entry.source_id} — {entry.title}
-                              {!entry.eligible
-                                ? " (HELD: upload will be refused)"
-                                : !entry.stored
-                                  ? " (not loaded yet)"
-                                  : entry.project_ids.length > 0
-                                    ? ` (in ${entry.project_ids.join(", ")})`
-                                    : " (in no project)"}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        Version Label:
-                        <input
-                          type="text"
-                          aria-label="Version Label"
-                          value={uploadVersionLabel}
-                          onChange={(e) => setUploadVersionLabel(e.target.value)}
-                          placeholder="e.g. Revision 2"
-                        />
-                      </label>
-                    </div>
-                    {registerError && (
-                      <div className="upload-status error" role="alert">
-                        {registerError}
-                      </div>
-                    )}
-                    {chosenSource && !chosenSource.eligible && (
-                      <div className="upload-status error" role="status">
-                        {chosenSource.source_id} is held
-                        {chosenSource.hold_reason ? `: ${chosenSource.hold_reason}` : ""}. The
-                        server will refuse this upload.
-                      </div>
-                    )}
-                    {chosenSource &&
-                      chosenSource.eligible &&
-                      chosenSource.stored &&
-                      !chosenSource.project_ids.includes(selectedProject) && (
-                        <div className="upload-status error" role="status">
-                          {chosenSource.source_id} is{" "}
-                          {chosenSource.project_ids.length > 0
-                            ? `searchable only in ${chosenSource.project_ids.join(", ")}`
-                            : "not linked to any project"}
-                          . Uploading it here will also make it searchable in {selectedProject}.
-                        </div>
-                      )}
-                    <div className="file-dropzone">
-                      <label className="file-dropzone-label" htmlFor="regulatory-pdf-upload">
-                        <div className="dropzone-icon-box">
-                          <svg
-                            className="upload-cloud-icon"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"
-                            />
-                          </svg>
-                        </div>
-                        <div className="dropzone-text-block">
-                          <strong className="dropzone-bold-text">
-                            {selectedPdfFile
-                              ? selectedPdfFile.name
-                              : "Click to select regulatory PDF or drag & drop"}
-                          </strong>
-                          <span className="dropzone-sub-text">
-                            Text PDFs only. A scanned page with no text is reported, not read (no OCR
-                            yet).
-                          </span>
-                        </div>
-                        <input
-                          id="regulatory-pdf-upload"
-                          type="file"
-                          accept=".pdf,application/pdf"
-                          aria-label="Select PDF File"
-                          className="visually-hidden-file-input"
-                          onChange={(e) => setSelectedPdfFile(e.target.files?.[0] || null)}
-                        />
-                      </label>
-                      <div className="button-group upload-btn-group">
-                        <button
-                          type="button"
-                          className="btn-primary"
-                          disabled={uploadLoading || !selectedPdfFile || !uploadSourceId}
-                          onClick={() => handleDocumentUpload()}
-                        >
-                          {uploadLoading ? "Extracting..." : "Upload Selected PDF"}
-                        </button>
-                      </div>
-                      <p className="muted">
-                        Uploads need the administrator role. A new version is stored at once, but
-                        it is only searched after it has been indexed (
-                        <code>python scripts/index_chunks.py</code>); until then the previous
-                        version of that document is not searched either.
-                      </p>
-                    </div>
-                    {uploadFeedback && (
-                      <div
-                        className={`upload-status ${uploadFeedback.type}`}
-                        role="status"
-                        aria-live="polite"
-                      >
-                        {uploadFeedback.message}
-                      </div>
-                    )}
-                  </div>
 
                   {libraryError && (
                     <div className="upload-status error" role="alert">
@@ -1067,13 +843,7 @@ export function App(): React.ReactElement {
 
                   <ul className="source-list" aria-label="Project Ingested Documents">
                     {[...projectDocs]
-                      .sort((a, b) => {
-                        if (a.source_id === uploadSourceId && b.source_id !== uploadSourceId)
-                          return -1;
-                        if (b.source_id === uploadSourceId && a.source_id !== uploadSourceId)
-                          return 1;
-                        return b.latest_version.version_number - a.latest_version.version_number;
-                      })
+                      .sort((a, b) => b.latest_version.version_number - a.latest_version.version_number)
                       .map((doc) => {
                         const ver = doc.latest_version;
                         const versions =

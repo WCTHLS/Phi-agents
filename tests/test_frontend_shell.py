@@ -103,7 +103,7 @@ def test_frontend_audit_viewer_extensions_and_csv_export_exist() -> None:
 
 
 def test_end_to_end_ui_workflow_contract() -> None:
-    """Verify E2E UI flow contract (S2-13): login -> upload -> ask -> cited answer -> review decision -> audit trail."""
+    """Verify E2E UI flow contract (S2-13): login -> ask -> cited answer -> review decision -> audit trail."""
     app_tsx = (FRONTEND_DIR / "src" / "App.tsx").read_text(encoding="utf-8")
     client_ts = (FRONTEND_DIR / "src" / "api" / "client.ts").read_text(encoding="utf-8")
     oidc_ts = (FRONTEND_DIR / "src" / "auth" / "oidc.ts").read_text(encoding="utf-8")
@@ -111,9 +111,6 @@ def test_end_to_end_ui_workflow_contract() -> None:
     # 1. Login (OIDC / dev-token session)
     assert "requestDevToken" in oidc_ts
     assert "/api/v1/auth/dev-token" in oidc_ts
-    # 2. Upload approved PDF version into project
-    assert "handleDocumentUpload" in app_tsx
-    assert "uploadSourceDocument" in client_ts
     # 3. Ask question in project context -> cited answer + passage inspector
     assert "handleRunQuery" in app_tsx
     assert "submitResearchQuery" in client_ts
@@ -158,15 +155,22 @@ def test_the_ui_has_no_canned_answers_or_hidden_fallbacks() -> None:
     assert app_tsx.count("SAMPLE DATA") >= 2
 
 
-def test_the_upload_form_lists_the_real_register_not_a_typed_in_list() -> None:
-    """The source choices come from the API; a typed-in list once omitted six approved documents."""
+def test_the_screen_has_no_document_upload_form() -> None:
+    """The upload form was taken out of the UI (6 Nov 2026). The server endpoints and the client
+    calls remain; nothing on the screen offers an upload."""
     app_tsx = (FRONTEND_DIR / "src" / "App.tsx").read_text(encoding="utf-8")
-    client_ts = (FRONTEND_DIR / "src" / "api" / "client.ts").read_text(encoding="utf-8")
 
-    assert "fetchSourceRegister" in app_tsx and "/api/v1/sources" in client_ts
-    assert 'useState<string>("ICH-Q3DR2")' not in app_tsx
-    for typed_in in ('<option value="ICH-Q3DR2">', '<option value="ICH-Q8R2">', "Tests 409 Rule"):
-        assert typed_in not in app_tsx, typed_in
+    for removed in (
+        "Ingest Document Version",
+        "Document Upload Form",
+        "Upload Selected PDF",
+        "handleDocumentUpload",
+        "regulatory-pdf-upload",
+        "fetchSourceRegister",
+        "uploadSourceDocument",
+    ):
+        assert removed not in app_tsx, removed
+    assert "Project Document Library" in app_tsx  # the library itself stays
 
 
 def test_the_ui_does_not_show_the_built_in_sample_sources() -> None:
