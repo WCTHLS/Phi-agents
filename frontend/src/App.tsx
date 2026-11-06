@@ -56,15 +56,6 @@ const GOLDEN_SAMPLE_QUESTIONS: Record<string, { label: string; query: string }[]
       query:
         "How do nitrite impurities in excipients cause nitrosamine formation and what is the three-step control strategy?",
     },
-    {
-      label: "Held / Unapproved Source Test (Stability / Q1A)",
-      query:
-        "What are the ICH Q1A accelerated stability storage conditions and shelf-life extrapolation rules?",
-    },
-    {
-      label: "Other Project's Document Test: expect no relevant evidence (dissolution belongs to PRJ-002)",
-      query: "What pH should a dissolution medium have to simulate gastric fluid?",
-    },
   ],
   "PRJ-002": [
     {

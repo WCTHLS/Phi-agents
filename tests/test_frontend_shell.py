@@ -232,7 +232,10 @@ def test_the_answer_panel_does_not_overstate_what_it_shows() -> None:
     # A verified answer is green only when nothing is flagged; otherwise it is the amber badge.
     assert "PARTLY SUPPORTED" in app_tsx
     assert app_tsx.index("evidence_gaps.length > 0") < app_tsx.index("GROUNDED IN")
-    assert app_tsx.count("expect no relevant evidence") == 2
+    assert app_tsx.count("expect no relevant evidence") == 1  # the PRJ-002 chip that remains
+    # The two PRJ-001 test chips (a held source, and another project's document) were removed.
+    assert "Held / Unapproved Source Test" not in app_tsx
+    assert "dissolution belongs to PRJ-002" not in app_tsx
 
 
 def test_a_long_dropdown_label_cannot_push_a_column_off_the_screen() -> None:
