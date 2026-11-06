@@ -68,6 +68,44 @@ def names(fused) -> list[str]:
 # --- merging two rankings (no database) ---------------------------------------------------------
 
 
+class _TwoLists:
+    """Stands in for the repository: each search returns the first ``limit`` of a fixed list."""
+
+    def __init__(self, vector: list[ChunkHit], keyword: list[ChunkHit]) -> None:
+        self._vector, self._keyword = vector, keyword
+
+    def __call__(self, _session: object) -> _TwoLists:
+        return self
+
+    def search_nearest(self, _vector, _projects, *, limit: int, **_kw) -> list[ChunkHit]:
+        return self._vector[:limit]
+
+    def search_keywords(self, _question, _projects, *, limit: int, **_kw) -> list[ChunkHit]:
+        return self._keyword[:limit]
+
+
+def test_a_passage_strong_in_one_search_and_25th_in_the_other_is_still_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The shape of a real miss: the Class 1 PDE table was 4th by meaning and 25th by keywords (28th here).
+    # With only 20 keyword candidates it earned nothing from that list and fell out of the top 3.
+    vector = [hit(n, distance=0.1 + i / 100) for i, n in enumerate(["V1", "V2", "V3", "TABLE"])]
+    keyword = [hit("F0", keyword=9.0), hit("V1", keyword=8.5), hit("V2", keyword=8.4)]
+    keyword += [hit(f"F{i}", keyword=8.0 - i / 10) for i in range(1, 25)]  # ranks 4 to 27
+    keyword.append(hit("TABLE", keyword=1.0))  # rank 28: beyond 20, within 50
+    fake = _TwoLists(vector, keyword)
+    monkeypatch.setattr("pharma_ai.features.research.search.ChunkRepository", fake)
+
+    def top3(**kw):
+        found = hybrid_search(
+            None, question="q", vector=[0.0], projects=["P"], embedding_model="m", limit=3, **kw
+        )
+        return names(found)
+
+    assert "TABLE" in top3()  # the default depth
+    assert "TABLE" not in top3(depth=20)  # what used to happen
+
+
 def test_a_passage_near_the_top_of_both_lists_beats_one_that_tops_a_single_list() -> None:
     vector = [hit("A", distance=0.1), hit("B", distance=0.2), hit("C", distance=0.3)]
     keyword = [hit("D", keyword=9.0), hit("B", keyword=8.0), hit("E", keyword=7.0)]
@@ -354,7 +392,7 @@ def test_passages_of_another_embedding_model_are_not_found(session: Session) -> 
 
 
 def test_the_defaults_are_the_documented_ones() -> None:
-    assert RRF_K == 60 and CANDIDATE_DEPTH == 20
+    assert RRF_K == 60 and CANDIDATE_DEPTH == 50
 
 
 @needs_db

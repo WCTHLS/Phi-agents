@@ -58,10 +58,13 @@ You should see `Seeded: 4 roles, 2 projects, 22 sources`.
 **3b. Ingest the corpus** (optional; needs the PDFs from `python scripts/fetch_corpus.py` and the manual downloads listed in `data/sources/CORPUS.md`):
 
 ```bash
-docker compose run --rm dev python scripts/ingest_corpus.py --project PRJ-001 --project PRJ-002
+docker compose run --rm dev python scripts/ingest_corpus.py
+docker compose run --rm dev python scripts/assign_documents.py
 ```
 
 It prints one line per document: `v1 added` with page count and whether the pages have text, `already` if that exact file was ingested before, `held` for documents that are not eligible (never ingested), and `missing` if the PDF is not on disk. Originals and extracted text go to `data/storage` (git-ignored). Run it again and nothing changes. Add `--dry-run` to preview.
+
+The second command divides the documents between the two sample projects: PRJ-001 (Metformin ER nitrosamine risk) gets the impurity and risk documents (FDA nitrosamine guidance, ICH M7, Q3C, Q3D, Q9, and the FDA stability Q&A) and PRJ-002 (BCS Class II bioavailability) gets the bioavailability, dissolution and process documents (ICH M9, M13A, FDA bioavailability, both dissolution guidances, process validation and tablet size). Each document belongs to exactly one project, so a question in one project is never answered from the other's documents; the list is `SAMPLE_PROJECT_DOCUMENTS` in `src/pharma_ai/infrastructure/db/seed.py` (decision log D22). It adds or removes links only, so nothing needs indexing again; `--dry-run` previews, and running it twice changes nothing. Each change is written to the audit trail.
 
 **3c. Cut the text into passages and embed them** (optional; needs step 3b). This one runs on your own machine, not in the dev tools container: the embedding library includes PyTorch (several hundred MB to install), and the model's download should be kept between runs. Use a virtual environment (see Option B):
 
@@ -71,6 +74,16 @@ python scripts/index_chunks.py
 ```
 
 The first run downloads the model's public weights (about 130 MB) from Hugging Face; no document text leaves your machine. It prints one line per document version: `indexed` with the number of passages, `already indexed` if nothing needed doing, or `skipped` for a scan with no text. On a laptop without a GPU expect roughly a third of a second per passage (about 4 minutes for the 13-document corpus) and under 1 GB of memory. Run it again and nothing changes; `--force` cuts and embeds again, `--only ICH-Q3DR2` limits it, `--dry-run` previews without loading the model.
+
+**After the text extractor improves** (for example, documents ingested before 5 Nov 2026 read "10⁻⁵" as "10-5" and show list bullets as boxes; decision log D20, D21), read the stored originals again, then cut and embed the passages again for the documents it lists:
+
+```bash
+python scripts/reextract_text.py --dry-run     # list what would change
+python scripts/reextract_text.py               # store the new text beside the old
+python scripts/index_chunks.py --force --only <the documents it printed>
+```
+
+The originals and the old text are never changed. Answers asked before the re-index keep their stored citations.
 
 **4. Run the tests.** The database tests need their own empty database (they erase it), so create it once:
 
@@ -114,6 +127,29 @@ docker compose stop db           # pause the database, keep its data
 docker compose down -v           # remove the database and ALL its data (start again from step 2)
 ```
 
+### Test users for project access
+
+Until real sign-in (Keycloak) is connected, the sign-in screen and the header's **Signed in as** list offer these made-up users. The API decides each person's role and projects from its own table (`src/pharma_ai/infrastructure/security/dev_users.py`), so the browser cannot ask for more. They exist so that a refusal can be seen:
+
+| User | Role | Projects |
+|---|---|---|
+| Dr. Aris Thorne (`thorne`) | scientist | PRJ-001 |
+| Dr. Priya Nair (`nair`) | scientist | PRJ-002 |
+| Dr. Marcus Webb (`webb`) | scientist | PRJ-001 and PRJ-002 |
+| Dr. Nora Lind (`lind`) | scientist | none |
+| Dr. Elena Vance (`vance`) | reviewer | PRJ-001 |
+| Dr. Ravi Menon (`menon`) | reviewer | PRJ-002 |
+| Platform Administrator (`admin`) | admin | PRJ-001 and PRJ-002 |
+
+The project list shows both projects and marks the ones the signed-in person does not belong to "no access"; choosing one shows the API refusing it (`403`), and the refusal appears in the audit log (sign in as the administrator, tab 4). Things to try:
+
+1. As Thorne, ask a nitrosamine question in PRJ-001, then switch to PRJ-002: the library and the question are refused.
+2. As Nair, the reverse. As Lind, everything is refused.
+3. As Thorne, ask a question in PRJ-001, then sign in as Menon (a reviewer, but only for PRJ-002) and try to approve it: refused. Vance (the reviewer for PRJ-001) can approve it; Thorne (a scientist) and the administrator cannot.
+4. As Vance, open the **Review Queue** tab: the questions waiting for review in PRJ-001, longest waiting first. Open one to read its answer, quotes and gaps, then approve, reject or ask for more evidence with a written rationale. Menon sees only PRJ-002's queue; Thorne and the administrator are told only a reviewer can see it.
+
+Users are made up for development. The endpoint that signs them in only works when `AUTH_MODE=dev` and `ENVIRONMENT` is `local` or `test`, and it will never be a substitute for real access control (decision log D23).
+
 ### Try the API with a real sign-in token
 
 The UI gets its own signed token from the API's development endpoint, so it needs no setup here. To call the API yourself (for example from the API docs), make a signed token for local development (it only works when `AUTH_MODE=dev` and `ENVIRONMENT=local`, which `make_env.py` sets):
@@ -121,6 +157,7 @@ The UI gets its own signed token from the API's development endpoint, so it need
 ```bash
 docker compose run --rm dev python scripts/dev_token.py --role admin
 docker compose run --rm dev python scripts/dev_token.py --role scientist --project PRJ-001
+docker compose run --rm dev python scripts/dev_token.py --user nair     # a named user, see below
 ```
 
 In http://localhost:8000/docs click **Authorize** and paste the token. A good first try, with a scientist token then an admin token:
@@ -199,6 +236,7 @@ There are several layers of checks, from fastest to broadest. Run them in this o
 | 4 | **End-to-end smoke test** | `python scripts/smoke_test.py` | Database with tables, and the API on port 8000 | The pieces work **together** over real HTTP (details below). |
 | 5 | **Evidence check** | `python evals/verify_questions.py` | The corpus PDFs (`python scripts/fetch_corpus.py` plus the manual downloads in `data/sources/CORPUS.md`) | Each golden question's evidence page can be found in the approved documents. Today 30 of 33 pass; the other 3 need the deferred Indian documents (see `CORPUS.md`). |
 | 5b | **Search check** | `python evals/retrieval_check.py --retriever hybrid --save evals/results/run.json` (`--retriever dense`, `keyword` or `hybrid`) | The corpus ingested and indexed (steps 3b and 3c above); loads the embedding model | For each golden question, whether the search returns a passage from the right document on the right page (top 1, 3 and 5). It is a measure for comparing changes (`--compare earlier.json`), not a verdict on answer quality; questions whose own patterns match no page, gap questions and uningested documents are listed and left out of the totals. |
+| 5c | **Answer check** | `python evals/answer_check.py --cross-limit 20 --save evals/results/answers.json` | The corpus ingested and indexed; `LLM_PROVIDER=groq` in `.env` to measure the language model (without it the word-matching writer is measured, and nothing leaves your machine) | Runs each golden question through the real search, the answer writer and the same checks the API applies, and scores the quotes with the golden questions' own evidence rules: how often the answer is withheld or correct, answer precision, recall and F1, how often the model's quotes are word for word in the passages, whether the system stays silent for a question asked in the project that cannot answer it, retries and speed, each with a 95% interval. With the model on it sends the question and three public passages per ask to the provider (about 22 s between asks keeps it inside the free tier). It stores nothing and audits nothing. See the definitions at the top of the script and decision log D27. |
 | 6 | **GitHub CI** | Push, then open the repository's Actions tab | GitHub | Secret scan, lint, tests against a real pgvector database, licence report and the UI build, on a clean machine. |
 
 ### The end-to-end smoke test
@@ -261,6 +299,7 @@ If the optional `opentelemetry-api` package is installed (`pip install -e ".[obs
 | `AUTH_MODE=dev is not allowed` / `AUDIT_BACKEND=memory is not allowed` | `ENVIRONMENT` is not `local` or `test`. These modes are blocked outside development on purpose. |
 | The UI says "Not signed in to the API" or calls answer `401` | The API is not running, or is not in dev mode. Start it with `AUTH_MODE=dev` and `ENVIRONMENT=local` in `.env`, then reload the page. |
 | A document you uploaded disappears from search | A new version is only searched after it has been indexed. Run `python scripts/index_chunks.py`. |
+| An exponent reads as a plain number ("10-5", "1 in 106"), or bullets show as boxes (▯) | The document was ingested before superscripts and symbol-font bullets were converted (decision log D20, D21). Run `python scripts/reextract_text.py`, then `python scripts/index_chunks.py --force` for the documents it lists. |
 | A port is already in use (5432, 8000, 5173) | Another program uses it. Change `POSTGRES_PORT` in `.env`, or map a different host port, for example `-p 8001:8000`. |
 | Database tests are skipped | `TEST_DATABASE_URL` is not set in your shell (see Option B). The dev container always sets it; it only needs `create_test_database.py` to have been run once. |
 | Smoke test says it could not reach the API | The API is not running. Start it as in step 5 (the dev container maps port 8000; the smoke test uses `http://127.0.0.1:8000` unless you pass `--base-url`). |
@@ -295,7 +334,7 @@ pharma-ai-platform/
 │   ├── architecture/                      # System diagrams, ERD, overview & ADRs
 │   ├── implementation/                    # Phased delivery plan & task board
 │   └── security/                          # 21 CFR Part 11, GxP & data handling checklists
-├── evals/                                 # Golden questions, evidence checker (verify_questions.py), search check (retrieval_check.py)
+├── evals/                                 # Golden questions, evidence checker (verify_questions.py), search check (retrieval_check.py), answer check (answer_check.py)
 ├── scripts/
 │   ├── make_env.py                        # Create your .env with random passwords
 │   ├── dev_token.py                       # Make a signed token for local API testing
@@ -303,6 +342,8 @@ pharma-ai-platform/
 │   ├── seed_dev_data.py                   # Load roles, sample projects and the source register
 │   ├── ingest_corpus.py                   # Ingest the corpus PDFs: store, fingerprint, extract text
 │   ├── index_chunks.py                    # Cut ingested text into passages and embed them
+│   ├── assign_documents.py                # Divide the documents between the sample projects
+│   ├── reextract_text.py                  # Read stored originals again after an extractor change
 │   ├── create_test_database.py            # Create the throwaway database for tests
 │   ├── fetch_corpus.py                    # Download the approved corpus PDFs (not committed)
 │   └── init-db.sql                        # Enables the pgvector extension (tables come from migrations)

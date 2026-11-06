@@ -295,9 +295,15 @@ textarea:focus {
 
 .two-column-grid {
   display: grid;
-  grid-template-columns: 1fr 1.38fr;
+  /* minmax(0, ...) lets a column be narrower than its widest content. A plain 1fr cannot shrink
+     below it, so one long dropdown label used to stretch a column and push the other off screen. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.38fr);
   gap: 1.75rem;
   align-items: start;
+}
+
+.two-column-grid > * {
+  min-width: 0;
 }
 
 @media (max-width: 1100px) {
@@ -512,8 +518,19 @@ textarea:focus {
 
 .upload-grid {
   display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
   gap: 0.75rem;
+}
+
+/* A dropdown is as wide as its longest option unless told otherwise; long source titles are cut
+   with an ellipsis in the closed box and shown in full in the list that opens. */
+.upload-grid select,
+.upload-grid input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  text-overflow: ellipsis;
 }
 
 @media (max-width: 640px) {
@@ -1514,4 +1531,47 @@ textarea:focus {
   border: 1px solid var(--unverified-border);
   padding: 1.25rem;
   border-radius: 8px;
+}
+
+/* Review queue: a list of stored questions beside the one that is open. */
+.queue-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.queue-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.queue-item:hover,
+.queue-item.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.queue-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.answer-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

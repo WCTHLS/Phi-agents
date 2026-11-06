@@ -19,7 +19,8 @@ What it measures, and what it does not:
     ingested ("skipped") and gap questions (the right answer is "not covered") are listed, not scored.
 
 Usage (from the repository root):
-    python evals/retrieval_check.py --project PRJ-001
+    python evals/retrieval_check.py                      # searches both sample projects together
+    python evals/retrieval_check.py --project PRJ-001    # only that project's documents
     python evals/retrieval_check.py --save evals/results/baseline.json
     python evals/retrieval_check.py --compare evals/results/baseline.json
     python evals/retrieval_check.py --query-prefix "Represent this sentence for searching relevant passages: "
@@ -52,6 +53,7 @@ from pharma_ai.core.config import settings
 from pharma_ai.features.research.search import hybrid_search
 from pharma_ai.infrastructure.db.models import Document, DocumentVersion
 from pharma_ai.infrastructure.db.repositories import ChunkHit, ChunkRepository
+from pharma_ai.infrastructure.db.seed import SAMPLE_PROJECTS
 from pharma_ai.infrastructure.db.session import make_engine, make_session_factory
 from pharma_ai.infrastructure.embeddings import Embedder, EmbedderUnavailable
 from pharma_ai.infrastructure.embeddings.local_model import SentenceTransformerEmbedder
@@ -363,7 +365,11 @@ def main(
     )
     ap.add_argument("--questions", type=Path, default=DEFAULT_QUESTIONS)
     ap.add_argument(
-        "--project", action="append", default=[], help="project searched (default PRJ-001)"
+        "--project",
+        action="append",
+        default=[],
+        help="project searched (default: every sample project, so the whole corpus is searched "
+        "although each document belongs to one project)",
     )
     ap.add_argument("--retriever", choices=sorted(RETRIEVERS), default="dense")
     ap.add_argument("--model", default=None, help="defaults to EMBEDDING_MODEL")
@@ -374,7 +380,7 @@ def main(
     ap.add_argument("--storage-root", default=None, help="defaults to STORAGE_ROOT")
     args = ap.parse_args(argv)
 
-    projects = args.project or ["PRJ-001"]
+    projects = args.project or [p["project_id"] for p in SAMPLE_PROJECTS]
     model_name = args.model or settings.embedding_model
     questions = load_questions(args.questions)
     try:

@@ -11,9 +11,10 @@ from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from pdf_factory import make_pdf
+from pdf_factory import make_pdf, make_pdf_from_streams
 from pypdf import PdfReader, PdfWriter
 
+from pharma_ai.features.documents import extraction
 from pharma_ai.features.documents.extraction import (
     MIN_PAGE_CHARS,
     ExtractionError,
@@ -106,6 +107,193 @@ def test_pdf_detection_allows_a_little_junk_before_the_header() -> None:
     assert looks_like_pdf(b"junk\r\n" + make_pdf([PAGE_ONE]))
     assert not looks_like_pdf(b"<html>%PDF-1.4 inside</html>".rjust(2000))
     assert not looks_like_pdf(b"")
+
+
+# --- superscripts (pypdf engine) -------------------------------------------------------------
+# Each page is drawn exactly: x positions follow Helvetica's character widths so that pypdf puts
+# no space where the printed page has none. "Tf" sets the font size, "Tm" places the text (its
+# first number scales it, its last is the height of the baseline).
+
+TAIL = b"( and more words after it) Tj"
+
+
+def _text_of(stream: bytes) -> str:
+    result = PypdfExtractor().extract(make_pdf_from_streams([stream]))
+    assert result.notes == ()
+    return result.pages[0].text
+
+
+def test_an_exponent_drawn_smaller_and_higher_is_written_as_a_superscript() -> None:
+    # As ICH M7 draws it: the font size changes to 8, and "-" and "5" are placed 4.6 higher.
+    stream = (
+        b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (a theoretical 10) Tj /F1 8 Tf 1 0 0 1 154.1 704.6 Tm "
+        b"(-) Tj 1 0 0 1 156.8 704.6 Tm (5) Tj /F1 12 Tf 1 0 0 1 161.3 700 Tm " + TAIL + b" ET"
+    )
+    assert _text_of(stream) == "a theoretical 10⁻⁵ and more words after it"
+
+
+def test_an_exponent_drawn_with_a_smaller_text_matrix_is_found_too() -> None:
+    # As the FDA nitrosamine guidance draws it: the font stays the same and the text matrix
+    # shrinks the "5". pypdf alone joins it into the line as "105". The PDF has no minus sign
+    # here, and none is added.
+    stream = (
+        b"BT /F1 1 Tf 12 0 0 12 72 700 Tm (cancer risk of 10) Tj 7.98 0 0 7.98 160.1 704.5 Tm "
+        b"(5) Tj 12 0 0 12 164.6 700 Tm " + TAIL + b" ET"
+    )
+    assert _text_of(stream) == "cancer risk of 10⁵ and more words after it"
+
+
+def test_footnote_markers_and_ion_charges_are_superscripts_as_printed() -> None:
+    footnote_list = (
+        b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (therapeutic index.) Tj /F1 8 Tf 1 0 0 1 166.8 704.5 Tm "
+        b"(17,) Tj 1 0 0 1 177.9 704.5 Tm (18) Tj /F1 12 Tf 1 0 0 1 186.8 700 Tm " + TAIL + b" ET"
+    )
+    ion = (
+        b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (and Ca) Tj /F1 8 Tf 1 0 0 1 110.8 704.5 Tm (2+) Tj "
+        b"/F1 12 Tf 1 0 0 1 120 700 Tm " + TAIL + b" ET"
+    )
+    assert _text_of(footnote_list) == "therapeutic index.¹⁷,¹⁸ and more words after it"
+    assert _text_of(ion) == "and Ca²⁺ and more words after it"
+
+
+def test_a_footnote_marker_that_opens_a_line_is_compared_with_the_text_after_it() -> None:
+    stream = (
+        b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (Body text line of the page.) Tj ET "
+        b"BT /F1 1 Tf 6.48 0 0 6.48 72 103.5 Tm (39) Tj 10 0 0 10 79.3 100 Tm "
+        b"( See the guidance) Tj ET"
+    )
+    assert _text_of(stream) == "Body text line of the page.\n³⁹ See the guidance"
+
+
+@pytest.mark.parametrize(
+    "name, stream, expected",
+    [
+        (
+            "raised letters have no superscript form in this rule",
+            b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (Bldg., 4) Tj /F1 8 Tf 1 0 0 1 112.8 704.5 Tm (th) Tj "
+            b"/F1 12 Tf 1 0 0 1 119.5 700 Tm " + TAIL + b" ET",
+            "Bldg., 4th and more words after it",
+        ),
+        (
+            "a decimal exponent cannot be written with superscript characters",
+            b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (S = kM) Tj /F1 8 Tf 1 0 0 1 109.8 704.5 Tm (0.67) Tj "
+            b"/F1 12 Tf 1 0 0 1 124 700 Tm " + TAIL + b" ET",
+            "S = kM0.67 and more words after it",
+        ),
+        (
+            "a subscript is lowered, not raised",
+            b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (the TD) Tj /F1 8 Tf 1 0 0 1 108.1 697 Tm (50) Tj "
+            b"/F1 12 Tf 1 0 0 1 117 700 Tm " + TAIL + b" ET",
+            "the TD50 and more words after it",
+        ),
+        (
+            "smaller on the same baseline is not a superscript",
+            b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (dose of 10) Tj /F1 8 Tf 1 0 0 1 128.1 700 Tm (5) Tj "
+            b"/F1 12 Tf 1 0 0 1 132.6 700 Tm " + TAIL + b" ET",
+            "dose of 105 and more words after it",
+        ),
+        (
+            "raised at the same size is not a superscript",
+            b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (dose of 10) Tj 1 0 0 1 128.1 704.5 Tm (5) Tj "
+            b"1 0 0 1 134.8 700 Tm " + TAIL + b" ET",
+            "dose of 105 and more words after it",
+        ),
+    ],
+)
+def test_text_that_is_not_a_superscript_is_left_as_it_was(
+    name: str, stream: bytes, expected: str
+) -> None:
+    assert _text_of(stream) == expected, name
+
+
+def test_plain_pages_read_exactly_as_before() -> None:
+    data = make_pdf([PAGE_ONE, PAGE_TWO, PAGE_THREE])
+    plain = [clean_text(page.extract_text()) for page in PdfReader(io.BytesIO(data)).pages]
+    assert [page.text for page in PypdfExtractor().extract(data).pages] == plain
+
+
+@pytest.mark.parametrize("failure", ["different text", "an error"])
+def test_if_marking_is_unsure_the_page_keeps_pypdfs_text_and_the_notes_say_so(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    def broken(_reader: object, _page: object) -> list[object]:
+        if failure == "an error":
+            raise RuntimeError("boom")
+        return [extraction._Run("not what pypdf read", 12.0, 700.0, True)]
+
+    monkeypatch.setattr(extraction, "_runs", broken)
+    result = PypdfExtractor().extract(make_pdf([PAGE_ONE, PAGE_TWO]))
+    assert "NDMA: 96 ng/day" in result.pages[0].text
+    assert "not what pypdf read" not in result.pages[0].text
+    assert result.status == "ok"  # the text is complete; only exponents may be flat
+    note = (
+        "superscripts and symbol-font characters could not be converted on page(s) 1, 2; there "
+        "an exponent such as 10⁻⁵ reads as 10-5 and a bullet may show as a box"
+    )
+    assert result.notes == (note,)
+
+
+# --- symbol-font characters (pypdf engine) ---------------------------------------------------
+# The /F2 font of these PDFs reads code 0xB7 as U+F0B7 and so on, the way bullets drawn with Word's
+# Symbol font come out of the corpus PDFs (ICH Q3D and Q9 show 142 of them as boxes otherwise).
+
+LIST_PAGE = (
+    b"BT /F1 12 Tf 1 0 0 1 72 720 Tm (Considerations, in order of relevance:) Tj ET "
+    b"BT /F2 12 Tf 1 0 0 1 72 700 Tm <B7> Tj /F1 12 Tf 1 0 0 1 80 700 Tm "
+    b"( The likely oxidation state of the element) Tj ET "
+    b"BT /F1 12 Tf 1 0 0 1 72 680 Tm (21.3 mg/kg ) Tj /F2 12 Tf 1 0 0 1 132 680 Tm <B8> Tj "
+    b"/F1 12 Tf 1 0 0 1 139 680 Tm ( 50,000 = 0.42 ) Tj /F2 12 Tf 1 0 0 1 220 680 Tm <6D> Tj "
+    b"/F1 12 Tf 1 0 0 1 227 680 Tm (g/kg) Tj ET"
+)
+ARROW_PAGE = (
+    b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (Efflux ratio = PappB) Tj /F2 12 Tf 1 0 0 1 192.1 700 Tm "
+    b"<E0> Tj /F1 12 Tf 1 0 0 1 204 700 Tm (A over the other way) Tj ET"
+)
+
+
+def _symbol_text(stream: bytes, font: str, program: bytes | None = None) -> str:
+    data = make_pdf_from_streams([stream], symbol_font=font, symbol_program=program)
+    result = PypdfExtractor().extract(data)
+    assert result.notes == ()
+    return result.pages[0].text
+
+
+@pytest.mark.parametrize(
+    "font, program",
+    [
+        ("SymbolMT", None),
+        # The corpus's own case: a generic name, with "Symbol" inside the embedded font program.
+        ("CIDFont+F5", b"%!PS-AdobeFont-1.0: Symbol 001.008"),
+    ],
+)
+def test_symbol_font_bullets_and_signs_become_the_characters_they_draw(
+    font: str, program: bytes | None
+) -> None:
+    text = _symbol_text(LIST_PAGE, font, program)
+    assert text.splitlines()[1].startswith("• ") and "The likely oxidation state" in text
+    assert "21.3 mg/kg ÷ 50,000 = 0.42 μg/kg" in text
+    assert not any("" <= ch <= "" for ch in text)
+
+
+def test_a_wingdings_character_uses_the_wingdings_table() -> None:
+    # In Wingdings code 0xE0 is an arrow; in Symbol the same code is a lozenge.
+    assert "PappB → A" in _symbol_text(ARROW_PAGE, "AZGAMO+Wingdings-Regular")
+
+
+def test_a_private_use_character_from_an_unknown_font_is_left_alone() -> None:
+    # Guessing could show the wrong symbol, so the character stays as pypdf read it.
+    text = _symbol_text(LIST_PAGE, "CIDFont+F9", b"%!PS-AdobeFont-1.0: SomethingElse")
+    assert "" in text and "" in text and "•" not in text
+
+
+def test_the_symbol_table_follows_the_symbol_fonts_layout() -> None:
+    table = extraction.SYMBOL_TABLE
+    samples = {0xB7: "•", 0xB8: "÷", 0x6D: "μ", 0xB3: "≥", 0xE5: "∑", 0x3D: "=", 0x41: "Α"}
+    for code, char in samples.items():
+        assert table[0xF000 + code] == char
+    assert extraction.WINGDINGS_TABLE[0xF0E0] == "→"
+    assert extraction.symbol_font_table(None) is None
+    assert extraction.symbol_font_table(object()) is None  # a damaged font record: unknown
 
 
 # --- Tika engine, against a stand-in server ---------------------------------------------------

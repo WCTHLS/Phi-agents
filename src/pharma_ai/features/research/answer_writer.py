@@ -112,6 +112,9 @@ STOPWORDS = frozenset(
 
 MAX_SENTENCES_PER_PASSAGE = 2
 MAX_QUOTES = 6
+# The longest quote a model may offer: a sentence, or an excerpt such as the headings and a few
+# rows of a table. Longer than this is a passage, not a quote, and is not used.
+MAX_QUOTE_CHARS = 1200
 QUOTING_MODE = "quotes-only"
 _WORD = re.compile(r"[a-z0-9]+")
 

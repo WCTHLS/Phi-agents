@@ -103,6 +103,47 @@ class SourceRepository:
     def get(self, source_id: str) -> Source | None:
         return self._session.get(Source, source_id)
 
+    def list_register(self) -> list[RegisterEntry]:
+        """Every source in the register (held ones too), with what has been stored for it."""
+        sources = list(self._session.scalars(select(Source).order_by(Source.source_id)))
+        document_ids = {
+            source_id: document_id
+            for source_id, document_id in self._session.execute(
+                select(Document.source_id, Document.document_id)
+            )
+        }
+        newest = dict(
+            self._session.execute(
+                select(
+                    DocumentVersion.document_id, func.max(DocumentVersion.version_number)
+                ).group_by(DocumentVersion.document_id)
+            ).all()
+        )
+        projects: dict[uuid.UUID, list[str]] = {}
+        for project_id, document_id in self._session.execute(
+            select(ProjectDocument.project_id, ProjectDocument.document_id).order_by(
+                ProjectDocument.project_id
+            )
+        ):
+            projects.setdefault(document_id, []).append(project_id)
+        return [
+            RegisterEntry(
+                source=source,
+                document_id=document_ids.get(source.source_id),
+                latest_version=newest.get(document_ids.get(source.source_id)),
+                project_ids=tuple(projects.get(document_ids.get(source.source_id), ())),
+            )
+            for source in sources
+        ]
+
+
+@dataclass(frozen=True)
+class RegisterEntry:
+    source: Source
+    document_id: uuid.UUID | None  # None until a file has been stored for the source
+    latest_version: int | None
+    project_ids: tuple[str, ...]  # the projects that may search the document
+
 
 class DocumentRepository:
     def __init__(self, session: Session) -> None:
@@ -526,6 +567,26 @@ class WorkflowRunRepository:
             WorkflowRun.run_id == run_id, WorkflowRun.project_id == project_id
         )
         return self._session.scalars(stmt).one_or_none()
+
+    def list_in_project(
+        self, project_id: str, *, status: str, limit: int, offset: int
+    ) -> tuple[list[WorkflowRun], int]:
+        """The project's runs with this status, and how many there are in all.
+
+        Runs waiting for review come oldest first, so the longest wait is at the top; decided runs
+        come with the latest decision first. Only this project's runs are ever returned.
+        """
+        where = (WorkflowRun.project_id == project_id, WorkflowRun.status == status)
+        order = (
+            (WorkflowRun.created_at.asc(), WorkflowRun.run_id.asc())
+            if status == "PENDING_EXPERT_REVIEW"
+            else (WorkflowRun.decided_at.desc(), WorkflowRun.run_id.asc())
+        )
+        total = self._session.scalar(select(func.count()).select_from(WorkflowRun).where(*where))
+        rows = self._session.scalars(
+            select(WorkflowRun).where(*where).order_by(*order).limit(limit).offset(offset)
+        )
+        return list(rows), total or 0
 
     def record_decision(self, run: WorkflowRun, *, status: str, decided_by: str) -> None:
         """Move the run to the reviewer's latest decision. The caller commits."""

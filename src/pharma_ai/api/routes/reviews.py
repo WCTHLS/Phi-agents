@@ -3,6 +3,9 @@
 - ``POST /api/v1/research/reviews``: a reviewer approves, rejects or asks for more evidence for
   one stored answer, with a written scientific rationale. Reviewers (``reviewer``, ``qa``) who are
   members of the project only.
+- ``GET /api/v1/research/reviews``: the project's stored questions and answers with a given status
+  (by default those waiting for review), for the reviewer's queue. Same people only. The listing
+  holds question and answer text, so it is recorded in the audit trail.
 
 The decision is checked against the server's own record of the answer (S2-09):
 - the run must exist and belong to the project in the request (otherwise 404, the same whether the
@@ -20,7 +23,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 
 from pharma_ai.api.routes.search import SessionDep
@@ -76,6 +79,50 @@ class ReviewDecisionRequest(BaseModel):
         return value
 
 
+Status = Literal["PENDING_EXPERT_REVIEW", "APPROVED", "REJECTED", "EVIDENCE_REQUESTED"]
+
+
+class QueueCitationOut(BaseModel):
+    source_id: str
+    title: str
+    version_number: int
+    version_label: str | None
+    page: int  # the page the quote is on
+    page_end: int | None
+    section: str | None
+    quoted_evidence: str
+    sha256: str
+    attribution: str | None
+
+
+class QueuedRunOut(BaseModel):
+    """One stored question and answer, as a reviewer needs to see it. The asker's e-mail address
+    is not included: the stable id says who asked."""
+
+    run_id: str
+    project_id: str
+    status: Status
+    asked_by: str
+    created_at: str
+    question: str
+    answer: str
+    withheld: bool  # no quote was found, so no answer was given
+    verified: bool
+    answer_mode: str
+    coverage: float  # share of the question's distinctive words found in the quotes
+    evidence_gaps: list[str]
+    citations: list[QueueCitationOut]
+    decided_by: str | None
+    decided_at: str | None
+
+
+class QueueOut(BaseModel):
+    project_id: str
+    status: Status
+    total: int  # all runs with this status, not only this page
+    items: list[QueuedRunOut]
+
+
 class ReviewDecisionOut(BaseModel):
     """The shape the review screen's history list shows."""
 
@@ -97,6 +144,79 @@ def _source_labels(citations: list[Any]) -> list[str]:
     for c in citations:
         labels.setdefault(f"{c['source_id']} (v{c['version_number']}, p. {c['page_start']})", None)
     return list(labels)
+
+
+def _queued(run: Any) -> QueuedRunOut:
+    return QueuedRunOut(
+        run_id=run.run_id,
+        project_id=run.project_id,
+        status=run.status,
+        asked_by=run.asked_by,
+        created_at=run.created_at.isoformat(),
+        question=run.question,
+        answer=run.answer,
+        withheld=not run.citations,
+        verified=run.verified,
+        answer_mode=run.answer_mode,
+        coverage=run.coverage,
+        evidence_gaps=list(run.evidence_gaps or []),
+        citations=[
+            QueueCitationOut(
+                source_id=c["source_id"],
+                title=c["title"],
+                version_number=c["version_number"],
+                version_label=c.get("version_label"),
+                page=c["page_start"],
+                page_end=c.get("page_end"),
+                section=c.get("section"),
+                quoted_evidence=c["quoted_evidence"],
+                sha256=c["sha256"],
+                attribution=c.get("attribution"),
+            )
+            for c in run.citations
+        ],
+        decided_by=run.decided_by,
+        decided_at=run.decided_at.isoformat() if run.decided_at else None,
+    )
+
+
+@router.get(
+    "",
+    response_model=QueueOut,
+    summary="List a project's stored questions by review status (reviewer or qa)",
+    description=(
+        "The reviewer's queue: the project's stored questions and answers that are waiting for "
+        "review (or, with a status, were approved, rejected or sent back for more evidence). Oldest "
+        "waiting first. Only reviewers who belong to the project; it contains question and answer "
+        "text, so every listing is recorded in the audit trail."
+    ),
+)
+def list_review_queue(
+    principal: ReviewerDep,
+    audit: AuditRecorderDep,
+    session: SessionDep,
+    project_id: Annotated[str, Query(min_length=1, max_length=64)],
+    status_filter: Annotated[Status, Query(alias="status")] = "PENDING_EXPERT_REVIEW",
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> QueueOut:
+    ensure_project_access(principal, project_id)  # a 403 does not say which projects exist
+    runs, total = WorkflowRunRepository(session).list_in_project(
+        project_id, status=status_filter, limit=limit, offset=offset
+    )
+    audit.success(
+        "REVIEW_QUEUE_LISTED",
+        "project",
+        resource_id=project_id,
+        project_id=project_id,
+        details={"status": status_filter, "returned": len(runs), "total": total},
+    )
+    return QueueOut(
+        project_id=project_id,
+        status=status_filter,
+        total=total,
+        items=[_queued(run) for run in runs],
+    )
 
 
 @router.post(

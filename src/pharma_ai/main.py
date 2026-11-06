@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import logging
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -79,6 +80,16 @@ def _audit_service_for(request: Request) -> AuditLogService:
     return request.app.dependency_overrides.get(get_audit_service, get_audit_service)()
 
 
+_PROJECT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def _project_named_in(request: Request) -> str | None:
+    """The project a refused request was about: in the path, or in the ``project_id`` query
+    parameter (the review queue). Only something shaped like a project id is recorded."""
+    named = request.path_params.get("project_id") or request.query_params.get("project_id")
+    return named if isinstance(named, str) and _PROJECT_ID.match(named) else None
+
+
 @app.exception_handler(StarletteHTTPException)
 async def record_refused_access(request: Request, exc: StarletteHTTPException):
     """Write every 403 for a logged-in caller to the audit trail, then answer as usual.
@@ -95,7 +106,7 @@ async def record_refused_access(request: Request, exc: StarletteHTTPException):
                 action="ACCESS_DENIED",
                 resource_type="endpoint",
                 resource_id=f"{request.method} {request.url.path}",
-                project_id=request.path_params.get("project_id"),
+                project_id=_project_named_in(request),
                 outcome="DENIED",
                 details={"status": 403, "reason": str(exc.detail)[:200]},
             )

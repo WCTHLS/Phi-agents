@@ -210,7 +210,6 @@ def _answer_in_project(
         details={
             "question": fingerprint,
             "top_k": query.top_k,
-            "strict_citation_mode": query.strict_citation_mode,
             "embedding_model": embedder.model_name,
             "answer_mode": result.mode,
             # The provider that saw the question and passages (even if its reply was unusable).
@@ -282,7 +281,6 @@ def query_regulatory_research(
         details={
             "query": fingerprint_text(query.query),
             "top_k": query.top_k,
-            "strict_citation_mode": query.strict_citation_mode,
             "publisher_filter": query.publisher_filter,
             "retrieved_source_ids": sorted({c.source_id for c in response.retrieved_evidence}),
             "citation_count": len(response.citations),

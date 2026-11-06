@@ -13,6 +13,11 @@ Order of work, chosen so a failure at any step leaves nothing half-done (ADR-007
 4. Write the database rows. The caller commits, after recording the audit event.
 
 Nothing is committed here: the caller decides when, so the audit trail can be written first.
+
+*Re-extraction* reads a stored original again with the current extractor (for example after
+superscripts began to be kept) and points the version at the new text. The original is never
+touched and stored objects are never overwritten: the new text is stored under a new name and the
+old one is kept, so passages cut from it can still be traced.
 """
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ from pharma_ai.features.documents.extraction import (
 from pharma_ai.infrastructure.db.models import Document, DocumentVersion, Project, ProjectDocument
 from pharma_ai.infrastructure.db.repositories import DocumentRepository, SourceRepository
 from pharma_ai.infrastructure.storage import ObjectStore
+from pharma_ai.infrastructure.storage.base import ObjectNotFoundError
 
 
 class IngestionError(Exception):
@@ -72,6 +78,16 @@ class ProjectNotFound(IngestionError):
     code = "project_not_found"
 
 
+class VersionNotFound(IngestionError):
+    code = "version_not_found"
+
+
+class StoredOriginalUnusable(IngestionError):
+    """The stored original is missing or no longer matches its recorded fingerprint."""
+
+    code = "stored_original_unusable"
+
+
 @dataclass(frozen=True)
 class IngestionResult:
     document_id: uuid.UUID
@@ -98,6 +114,39 @@ def original_key(source_id: str, sha256: str) -> str:
 
 def extracted_key(source_id: str, sha256: str) -> str:
     return f"extracted/{source_id}/{sha256}.json"
+
+
+def store_extracted_text(store: ObjectStore, source_id: str, sha256: str, payload: bytes) -> str:
+    """Store a file's extracted text and return its key.
+
+    The first text read from a file is named after the file's fingerprint. A different text read
+    later from the same file (a newer extractor) is named after the text's own fingerprint as
+    well, because a stored object is never overwritten.
+    """
+    key = extracted_key(source_id, sha256)
+    if store.exists(key) and store.get(key) != payload:
+        text_sha = hashlib.sha256(payload).hexdigest()[:16]
+        key = f"extracted/{source_id}/{sha256}.{text_sha}.json"
+    store.put(key, payload)
+    return key
+
+
+@dataclass(frozen=True)
+class ReextractionResult:
+    version_id: uuid.UUID
+    source_id: str
+    version_number: int
+    sha256: str
+    changed: bool  # False if the text read now is exactly the stored text
+    changed_pages: tuple[int, ...]  # pages whose text differs from the stored text
+    previous_key: str | None
+    extracted_key: str | None  # the key now in use (unchanged on a dry run)
+    extraction_method: str
+    extraction_status: str
+
+
+def _payload(extraction: ExtractionResult) -> bytes:
+    return json.dumps(extraction.to_dict(), ensure_ascii=False).encode()
 
 
 def _result_from(
@@ -203,9 +252,8 @@ class DocumentIngestionService:
         # 3. Files first. They are named after the fingerprint, so a retry after a later
         #    failure writes the same bytes to the same names and changes nothing.
         object_key = original_key(source_id, sha256)
-        text_key = extracted_key(source_id, sha256)
         self._store.put(object_key, data)
-        self._store.put(text_key, json.dumps(extraction.to_dict(), ensure_ascii=False).encode())
+        text_key = store_extracted_text(self._store, source_id, sha256, _payload(extraction))
 
         # 4. Database rows.
         if document is None:
@@ -235,6 +283,69 @@ class DocumentIngestionService:
         )
         self._grant(document, projects)
         return _result_from(document, version, projects, already_ingested=False)
+
+    def reextract(self, version_id: uuid.UUID, *, dry_run: bool = False) -> ReextractionResult:
+        """Read a stored original again and point its version at the new text, if it differs.
+
+        The passages are not cut again here: run the indexing step with ``force`` afterwards.
+        Nothing is committed; on a dry run nothing is stored or changed either.
+        """
+        version = self._session.get(DocumentVersion, version_id)
+        document = self._session.get(Document, version.document_id) if version else None
+        if version is None or document is None:
+            raise VersionNotFound(f"unknown document version: {version_id}")
+        source = self._sources.get(document.source_id)
+        if source is None or not source.eligible:
+            raise SourceNotEligible(f"source {document.source_id} is not eligible")
+        try:
+            data = self._store.get(version.object_key)
+        except ObjectNotFoundError as exc:
+            raise StoredOriginalUnusable(f"{version.object_key} is not in the store") from exc
+        if hashlib.sha256(data).hexdigest() != version.sha256:
+            raise StoredOriginalUnusable(f"{version.object_key} no longer matches its fingerprint")
+        try:
+            extraction = self._extract(data)
+        except ExtractionError as exc:
+            raise UnreadablePdf(str(exc)) from exc
+
+        payload = _payload(extraction)
+        stored = self._stored_text(version.extracted_key)
+        before = {}
+        if stored is not None:
+            before = {int(p["page"]): p["text"] for p in json.loads(stored).get("pages", [])}
+        changed_pages = tuple(p.page for p in extraction.pages if before.get(p.page) != p.text)
+        changed = stored != payload
+        previous = version.extracted_key
+        if changed and not dry_run:
+            version.extracted_key = store_extracted_text(
+                self._store, document.source_id, version.sha256, payload
+            )
+            version.page_count = extraction.page_count
+            version.text_layer = extraction.text_layer
+            version.extraction_method = extraction.method
+            version.extraction_status = extraction.status
+            version.extraction_notes = list(extraction.notes)
+            self._session.flush()
+        return ReextractionResult(
+            version_id=version.version_id,
+            source_id=document.source_id,
+            version_number=version.version_number,
+            sha256=version.sha256,
+            changed=changed,
+            changed_pages=changed_pages,
+            previous_key=previous,
+            extracted_key=version.extracted_key,
+            extraction_method=extraction.method,
+            extraction_status=extraction.status,
+        )
+
+    def _stored_text(self, key: str | None) -> bytes | None:
+        if not key:
+            return None
+        try:
+            return self._store.get(key)
+        except ObjectNotFoundError:
+            return None
 
     def _grant(self, document: Document, project_ids: Sequence[str]) -> None:
         """Link the document to the projects (skipping links that already exist)."""

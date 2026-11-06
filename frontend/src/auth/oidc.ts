@@ -5,6 +5,7 @@
 export type UserRole = "scientist" | "reviewer" | "admin";
 
 export interface OidcSession {
+  userKey: string;
   sub: string;
   name: string;
   email: string;
@@ -59,48 +60,111 @@ export async function buildOidcAuthorizeUrl(config: OidcConfig = defaultOidcConf
   return `${config.issuerUrl}/protocol/openid-connect/auth?${params.toString()}`;
 }
 
-export function createDevSession(role: UserRole = "scientist"): OidcSession {
-  const roleProfiles: Record<UserRole, { name: string; email: string; projects: string[] }> = {
-    scientist: {
-      name: "Dr. Aris Thorne (Formulation Scientist)",
-      email: "a.thorne@pharma.local",
-      projects: ["PRJ-001", "PRJ-002"],
-    },
-    reviewer: {
-      name: "Dr. Elena Vance (QA & Regulatory Reviewer)",
-      email: "e.vance@pharma.local",
-      projects: ["PRJ-001", "PRJ-002"],
-    },
-    admin: {
-      name: "Platform & Compliance Administrator",
-      email: "admin@pharma.local",
-      projects: ["PRJ-001", "PRJ-002"],
-    },
-  };
-  const profile = roleProfiles[role];
+/**
+ * The development users. The API holds the same table (src/pharma_ai/infrastructure/security/
+ * dev_users.py) and decides each person's role and projects from it; what is listed here is only
+ * what the sign-in screen shows. A test checks that the two lists agree. Each person belongs to
+ * some projects and not others on purpose, so that a refusal can be seen.
+ */
+export interface DevUser {
+  key: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  projects: string[];
+  blurb: string;
+}
+
+export const DEV_USERS: DevUser[] = [
+  {
+    key: "thorne",
+    name: "Dr. Aris Thorne",
+    email: "a.thorne@pharma.local",
+    role: "scientist",
+    projects: ["PRJ-001"],
+    blurb: "Scientist, PRJ-001 only",
+  },
+  {
+    key: "nair",
+    name: "Dr. Priya Nair",
+    email: "p.nair@pharma.local",
+    role: "scientist",
+    projects: ["PRJ-002"],
+    blurb: "Scientist, PRJ-002 only",
+  },
+  {
+    key: "webb",
+    name: "Dr. Marcus Webb",
+    email: "m.webb@pharma.local",
+    role: "scientist",
+    projects: ["PRJ-001", "PRJ-002"],
+    blurb: "Scientist, both projects",
+  },
+  {
+    key: "lind",
+    name: "Dr. Nora Lind",
+    email: "n.lind@pharma.local",
+    role: "scientist",
+    projects: [],
+    blurb: "Scientist, no project (refused everywhere)",
+  },
+  {
+    key: "vance",
+    name: "Dr. Elena Vance",
+    email: "e.vance@pharma.local",
+    role: "reviewer",
+    projects: ["PRJ-001"],
+    blurb: "Reviewer, PRJ-001 only",
+  },
+  {
+    key: "menon",
+    name: "Dr. Ravi Menon",
+    email: "r.menon@pharma.local",
+    role: "reviewer",
+    projects: ["PRJ-002"],
+    blurb: "Reviewer, PRJ-002 only",
+  },
+  {
+    key: "admin",
+    name: "Platform Administrator",
+    email: "admin@pharma.local",
+    role: "admin",
+    projects: ["PRJ-001", "PRJ-002"],
+    blurb: "Admin: uploads PDFs, reads the audit log",
+  },
+];
+
+/**
+ * Every project any development user belongs to. The project list shows the ones the signed-in
+ * person is not in as "no access", so that choosing one shows the API refusing it. Names are not
+ * listed here: the API only tells a person the names of their own projects.
+ */
+export const DEV_PROJECT_IDS: string[] = [...new Set(DEV_USERS.flatMap((u) => u.projects))].sort();
+
+export function createDevSession(userKey: string = DEV_USERS[0].key): OidcSession {
+  const user = DEV_USERS.find((u) => u.key === userKey) ?? DEV_USERS[0];
   return {
-    sub: `oidc-${role}-001`,
-    name: profile.name,
-    email: profile.email,
-    role,
-    projectIds: profile.projects,
-    accessToken: `dev-jwt-${role}-PRJ-001`,
+    userKey: user.key,
+    sub: `dev-${user.key}`,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    projectIds: user.projects,
+    accessToken: `dev-jwt-${user.key}`,
     idpProvider: "keycloak",
     expiresAt: Date.now() + 3600 * 1000,
   };
 }
 
 
-export async function requestDevToken(
-  role: UserRole = "scientist",
-  projects: string[] = ["PRJ-001", "PRJ-002"]
-): Promise<string | null> {
+export async function requestDevToken(userKey: string): Promise<string | null> {
   try {
     const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
+    // Only the user's name is sent. The API decides the role and projects from its own table.
     const res = await fetch(`${apiBase}/api/v1/auth/dev-token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role, projects }),
+      body: JSON.stringify({ user: userKey }),
     });
     if (res.ok) {
       const data = await res.json();

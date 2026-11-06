@@ -42,6 +42,31 @@ SAMPLE_PROJECTS = (
     },
 )
 
+# Which approved documents each sample project may search. Every document belongs to exactly one
+# project, so a question asked in one project can never be answered from the other's documents.
+# Chosen by the backend developer on 5 Nov 2026 from the projects' topics (decision log D22); it is
+# demo data, not a statement about which documents a real project would need. Applied by
+# ``scripts/assign_documents.py``.
+SAMPLE_PROJECT_DOCUMENTS: dict[str, tuple[str, ...]] = {
+    "PRJ-001": (  # nitrosamine and impurity control for an extended-release tablet
+        "FDA-NITRO-2024",
+        "ICH-M7R2",
+        "ICH-Q3CR9",
+        "ICH-Q3DR2",
+        "ICH-Q9R1",
+        "FDA-ANDA-STAB-2014",
+    ),
+    "PRJ-002": (  # bioavailability, dissolution and process for an immediate-release capsule
+        "ICH-M9",
+        "ICH-M13A",
+        "FDA-BA-2022",
+        "FDA-DISS-1997",
+        "FDA-DISS-HS-2018",
+        "FDA-PV-2011",
+        "FDA-SIZE-2022",
+    ),
+}
+
 
 def _clean(value: str | None) -> str | None:
     value = (value or "").strip()

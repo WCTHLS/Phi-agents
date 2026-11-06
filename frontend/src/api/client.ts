@@ -6,17 +6,6 @@ export interface HealthResponse {
   status: string;
 }
 
-export interface DocumentMetadata {
-  source_id: string;
-  title: string;
-  publisher: string;
-  publication_date: string;
-  version: string;
-  url_or_identifier: string;
-  content_hash: string;
-  notes?: string | null;
-}
-
 export interface Citation {
   source_id: string;
   document_title: string;
@@ -53,7 +42,6 @@ export interface ResearchQueryRequest {
   project_id?: string | null;
   publisher_filter?: string[] | null;
   top_k?: number;
-  strict_citation_mode?: boolean;
 }
 
 export interface ResearchResponse {
@@ -127,18 +115,6 @@ export async function checkHealth(accessToken?: string): Promise<HealthResponse>
   return (await response.json()) as HealthResponse;
 }
 
-export async function fetchApprovedSources(accessToken?: string): Promise<DocumentMetadata[]> {
-  const headers: Record<string, string> = { Accept: "application/json" };
-  if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
-  }
-  const response = await fetch(`${API_BASE}/api/v1/research/sources`, { headers });
-  if (!response.ok) {
-    throw new Error(`Failed to load approved sources (${response.status})`);
-  }
-  return (await response.json()) as DocumentMetadata[];
-}
-
 export async function submitResearchQuery(
   payload: ResearchQueryRequest,
   accessToken?: string
@@ -181,6 +157,65 @@ export async function submitReviewDecision(
     throw await failure(response, "Review decision not recorded");
   }
   return (await response.json()) as ReviewHistoryEntry;
+}
+
+/** A stored question and answer in the reviewer's queue. The asker's e-mail is not included. */
+export interface QueueCitation {
+  source_id: string;
+  title: string;
+  version_number: number;
+  version_label?: string | null;
+  page: number;
+  page_end?: number | null;
+  section?: string | null;
+  quoted_evidence: string;
+  sha256: string;
+  attribution?: string | null;
+}
+
+export interface QueuedRun {
+  run_id: string;
+  project_id: string;
+  status: ReviewGateStatus;
+  asked_by: string;
+  created_at: string;
+  question: string;
+  answer: string;
+  withheld: boolean;
+  verified: boolean;
+  answer_mode: string;
+  coverage: number;
+  evidence_gaps: string[];
+  citations: QueueCitation[];
+  decided_by?: string | null;
+  decided_at?: string | null;
+}
+
+export interface ReviewQueue {
+  project_id: string;
+  status: ReviewGateStatus;
+  total: number;
+  items: QueuedRun[];
+}
+
+/** The project's stored questions with this review status (reviewers who belong to the project). */
+export async function fetchReviewQueue(
+  projectId: string,
+  status: ReviewGateStatus,
+  accessToken?: string
+): Promise<ReviewQueue> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+  const query = new URLSearchParams({ project_id: projectId, status, limit: "50" });
+  const response = await fetch(`${API_BASE}/api/v1/research/reviews?${query.toString()}`, {
+    headers,
+  });
+  if (!response.ok) {
+    throw await failure(response, "The review queue could not be loaded");
+  }
+  return (await response.json()) as ReviewQueue;
 }
 
 export interface AuditEventItem {
@@ -285,6 +320,52 @@ export async function fetchProjectDocuments(
     throw new Error(`Failed to load project documents (${response.status})`);
   }
   return (await response.json()) as ProjectDocument[];
+}
+
+/** A project as the API describes it. The API only lists the projects the caller belongs to. */
+export interface ProjectInfo {
+  project_id: string;
+  name: string;
+  therapeutic_area?: string | null;
+  dosage_form?: string | null;
+}
+
+export async function fetchMyProjects(accessToken?: string): Promise<ProjectInfo[]> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+  const response = await fetch(`${API_BASE}/api/v1/projects`, { headers });
+  if (!response.ok) {
+    throw new Error(`Failed to load your projects (${response.status})`);
+  }
+  return (await response.json()) as ProjectInfo[];
+}
+
+/** One entry of the approved-source register, as the upload form needs it (administrators only). */
+export interface RegisterEntry {
+  source_id: string;
+  title: string;
+  authority: string;
+  version_label?: string | null;
+  eligible: boolean;
+  hold_reason?: string | null;
+  tier: string;
+  stored: boolean;
+  latest_version?: number | null;
+  project_ids: string[];
+}
+
+export async function fetchSourceRegister(accessToken?: string): Promise<RegisterEntry[]> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+  const response = await fetch(`${API_BASE}/api/v1/sources`, { headers });
+  if (!response.ok) {
+    throw new Error(`Failed to load the approved-source register (${response.status})`);
+  }
+  return (await response.json()) as RegisterEntry[];
 }
 
 export async function uploadSourceDocument(params: {

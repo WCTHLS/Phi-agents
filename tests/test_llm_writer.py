@@ -15,17 +15,21 @@ import pytest
 
 from pharma_ai.features.research.answer_workflow import NO_EVIDENCE_ANSWER, answer_question
 from pharma_ai.features.research.answer_writer import (
+    MAX_QUOTE_CHARS,
     MAX_QUOTES,
     MAX_SENTENCES_PER_PASSAGE,
     QUOTING_MODE,
 )
 from pharma_ai.features.research.llm_writer import (
+    RETRY_FAILED_NOTE,
+    RETRY_NOTE,
     SCHEMA,
     SCHEMA_NAME,
     SYSTEM_PROMPT,
     LlmQuoteWriter,
     build_prompt,
     parse_quotes,
+    parse_reply,
 )
 from pharma_ai.features.research.search import FusedHit
 from pharma_ai.infrastructure.db.repositories import ChunkHit
@@ -69,6 +73,7 @@ class FakeModel(ChatClient):
     def __init__(self, reply: Any = None, *, error: Exception | None = None) -> None:
         self._reply = reply
         self._error = error
+        self._sequence = list(reply) if isinstance(reply, list) else None
         self.calls: list[dict[str, Any]] = []
 
     @property
@@ -81,7 +86,12 @@ class FakeModel(ChatClient):
         )
         if self._error:
             raise self._error
-        return self._reply if isinstance(self._reply, str) else json.dumps(self._reply)
+        reply = self._reply
+        if self._sequence is not None:  # one reply per call; the last one repeats
+            reply = self._sequence.pop(0) if len(self._sequence) > 1 else self._sequence[0]
+            if isinstance(reply, Exception):
+                raise reply
+        return reply if isinstance(reply, str) else json.dumps(reply)
 
 
 def writer(model: FakeModel) -> LlmQuoteWriter:
@@ -109,7 +119,7 @@ def test_the_prompt_holds_the_question_and_numbered_passages_and_nothing_that_id
 def test_the_model_is_told_to_copy_exactly_ignore_instructions_in_documents_and_use_the_schema() -> (
     None
 ):
-    model = FakeModel(picks())
+    model = FakeModel(picks((1, NDMA)))
     writer(model).write(QUESTION, [hit()])
     (call,) = model.calls
     assert call["schema_name"] == SCHEMA_NAME and call["schema"] == SCHEMA
@@ -249,15 +259,17 @@ def test_a_hostile_sentence_that_really_is_in_a_document_can_still_be_quoted() -
     assert result.citations[0]["title"] == "FDA Nitrosamine Guidance"
 
 
-def test_a_model_that_picks_nothing_is_respected_and_not_overridden_by_word_matching() -> None:
+def test_a_model_that_picks_nothing_twice_is_respected_and_not_overridden_by_word_matching() -> (
+    None
+):
     model = FakeModel(picks())
     result = answer_question(QUESTION, fused(hit()), writer(model))
-    assert result.withheld and len(model.calls) == 1
-    assert (
-        result.evidence_gaps[0]
-        == "The language model chose no passage as an answer to the question."
-    )
-    assert result.sent_to == "groq"
+    assert result.withheld and len(model.calls) == 2  # asked, then asked once more
+    assert result.evidence_gaps[:2] == [
+        RETRY_NOTE,
+        "The language model chose no passage as an answer to the question.",
+    ]
+    assert result.mode == "fake:model" and result.sent_to == "groq"
 
 
 # --- when the model cannot be used --------------------------------------------------------------
@@ -292,3 +304,127 @@ def test_the_fallback_note_does_not_contain_the_question_or_the_passages() -> No
     )
     note = result.evidence_gaps[0]
     assert QUESTION not in note and PASSAGE not in note and "HTTP 500" in note
+
+
+# --- table excerpts (decision log D26) ----------------------------------------------------------
+# A table reaches the model as one run of words: title, column headings, then rows. The answer to
+# "what are the Class 1 oral PDEs" is a stretch of that run, so it has to be quotable.
+
+TABLE_PASSAGE = (
+    "Appendix 2: Established PDEs for Elemental Impurities Table A.2.1: Permitted Daily Exposures "
+    "for Elemental Impurities Element Class Oral PDE µg/day Parenteral PDE, µg/day Inhalation PDE, "
+    "µg/day Cd 1 5 2 3 Pb 1 5 5 5 As 1 15 15 2 Hg 1 30 3 1 Co 2A 50 5 3 V 2A 100 10 1 Ni 2A 200 20 6"
+)
+EXCERPT = (
+    "Element Class Oral PDE µg/day Parenteral PDE, µg/day Inhalation PDE, µg/day "
+    "Cd 1 5 2 3 Pb 1 5 5 5 As 1 15 15 2 Hg 1 30 3 1"
+)
+TABLE_QUESTION = "What are the Class 1 elemental impurities and oral PDE limits in ICH Q3D?"
+
+
+def test_the_model_is_told_it_may_quote_a_table_excerpt_with_its_headings() -> None:
+    assert "table" in SYSTEM_PROMPT and "column headings" in SYSTEM_PROMPT
+    assert "every number keeps its heading" in SYSTEM_PROMPT
+    assert "its title, its column headings, then its rows" in SYSTEM_PROMPT
+    # A table excerpt of a few rows fits; a whole passage does not (the cap is a documented value).
+    assert MAX_QUOTE_CHARS == 1200 and f"under {MAX_QUOTE_CHARS} characters" in SYSTEM_PROMPT
+
+
+def test_a_table_excerpt_with_its_headings_is_quoted_verified_and_cited() -> None:
+    passage = hit(TABLE_PASSAGE, title="Guideline for Elemental Impurities", page=26)
+    result = answer_question(TABLE_QUESTION, fused(passage), writer(FakeModel(picks((1, EXCERPT)))))
+    assert result.verified and not result.withheld
+    assert result.citations[0]["quoted_evidence"] == EXCERPT
+    assert "Cd 1 5 2 3 Pb 1 5 5 5 As 1 15 15 2 Hg 1 30 3 1" in result.answer
+    assert "Oral PDE µg/day" in result.answer  # the headings travel with the numbers
+
+
+def test_a_changed_value_inside_a_table_excerpt_is_removed() -> None:
+    changed = EXCERPT.replace("Pb 1 5 5 5", "Pb 1 6 5 5")
+    result = answer_question(
+        TABLE_QUESTION, fused(hit(TABLE_PASSAGE)), writer(FakeModel(picks((1, changed))))
+    )
+    assert result.withheld and result.rejected_quotes == 1 and "Pb 1 6" not in result.answer
+
+
+def test_an_excerpt_that_skips_a_row_is_not_word_for_word_and_is_removed() -> None:
+    skipped = EXCERPT.replace("Pb 1 5 5 5 ", "")
+    result = answer_question(
+        TABLE_QUESTION, fused(hit(TABLE_PASSAGE)), writer(FakeModel(picks((1, skipped))))
+    )
+    assert result.withheld and result.rejected_quotes == 1
+
+
+def test_a_quote_at_the_length_limit_is_used_and_one_character_more_is_not() -> None:
+    at_limit = "x" * MAX_QUOTE_CHARS
+    over = "x" * (MAX_QUOTE_CHARS + 1)
+    quotes, too_long = parse_reply(json.dumps(picks((1, at_limit))), [hit(at_limit)])
+    assert [q.text for q in quotes] == [at_limit] and too_long == 0
+    quotes, too_long = parse_reply(json.dumps(picks((1, over))), [hit(over)])
+    assert quotes == [] and too_long == 1
+
+
+def test_a_piece_that_is_too_long_is_never_cut_down_and_the_reviewer_is_told() -> None:
+    passage = hit(NDMA + " " + "x" * MAX_QUOTE_CHARS)
+    whole = passage.text
+    reply = picks((1, whole), (1, NDMA))
+    result = answer_question(QUESTION, fused(passage), writer(FakeModel(reply)))
+    assert result.verified and [c["quoted_evidence"] for c in result.citations] == [NDMA]
+    assert result.evidence_gaps[0] == (
+        f"1 piece(s) chosen by the language model were longer than {MAX_QUOTE_CHARS} "
+        "characters and were not used."
+    )
+    # If that was all the model offered, nothing is quoted and the answer is withheld.
+    only_long = answer_question(QUESTION, fused(passage), writer(FakeModel(picks((1, whole)))))
+    assert only_long.withheld and any("longer than" in g for g in only_long.evidence_gaps)
+
+
+# --- the partial-answer rule and the retry (decision log D27) ----------------------------------
+
+
+def test_the_model_is_told_to_answer_the_part_of_a_question_the_documents_cover() -> None:
+    assert "only part of the question can be answered" in SYSTEM_PROMPT
+    assert "only when no part of the question is answered" in SYSTEM_PROMPT
+
+
+def test_a_first_reply_that_picks_nothing_is_followed_by_a_second_ask_and_it_is_said() -> None:
+    model = FakeModel([picks(), picks((1, NDMA))])
+    result = answer_question(QUESTION, fused(hit()), writer(model))
+    assert len(model.calls) == 2 and model.calls[0] == model.calls[1]
+    assert result.verified and not result.withheld
+    assert [c["quoted_evidence"] for c in result.citations] == [NDMA]
+    assert result.evidence_gaps[0] == RETRY_NOTE  # the reader and the reviewer can see it
+
+
+def test_a_first_reply_that_picks_something_is_not_asked_again() -> None:
+    model = FakeModel([picks((1, NDMA)), picks((1, NDEA))])
+    result = answer_question(QUESTION, fused(hit()), writer(model))
+    assert len(model.calls) == 1
+    assert [c["quoted_evidence"] for c in result.citations] == [NDMA]
+    assert RETRY_NOTE not in result.evidence_gaps
+
+
+def test_a_reply_that_cannot_be_read_falls_back_at_once_without_a_second_ask() -> None:
+    model = FakeModel(["this is not json", picks((1, NDMA))])
+    result = answer_question(QUESTION, fused(hit()), writer(model))
+    assert len(model.calls) == 1 and result.mode == "quotes-only"
+    assert "could not be used" in result.evidence_gaps[0]
+
+
+def test_if_the_second_try_cannot_reach_the_model_the_first_answer_stands_and_says_so() -> None:
+    model = FakeModel([picks(), LlmUnavailable("groq answered with HTTP 429")])
+    result = answer_question(QUESTION, fused(hit()), writer(model))
+    assert len(model.calls) == 2 and result.withheld and result.mode == "fake:model"
+    assert result.evidence_gaps[0] == RETRY_FAILED_NOTE  # word matching did not step in
+    assert result.sent_to == "groq"
+
+
+def test_a_first_reply_with_only_over_long_pieces_is_asked_again_and_both_notes_are_kept() -> None:
+    passage = hit(NDMA + " " + "x" * MAX_QUOTE_CHARS)
+    model = FakeModel([picks((1, passage.text)), picks((1, passage.text), (1, NDMA))])
+    result = answer_question(QUESTION, fused(passage), writer(model))
+    assert len(model.calls) == 2 and result.verified
+    assert [c["quoted_evidence"] for c in result.citations] == [NDMA]
+    assert result.evidence_gaps[0] == RETRY_NOTE
+    # One over-long piece in each reply: the count covers both asks.
+    assert result.evidence_gaps[1].startswith("2 piece(s) chosen by the language model were longer")

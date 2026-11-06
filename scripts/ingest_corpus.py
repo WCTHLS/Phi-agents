@@ -8,9 +8,12 @@ uses the same code as the upload endpoint, so the same rules apply: a document t
 nothing the second time.
 
 Usage (from the repository root, after `alembic upgrade head` and the seed script):
-    python scripts/ingest_corpus.py --project PRJ-001 --project PRJ-002
+    python scripts/ingest_corpus.py
     python scripts/ingest_corpus.py --only ICH-Q3DR2 FDA-PV-2011 --project PRJ-001
     python scripts/ingest_corpus.py --dry-run
+
+A document is only searched for a project it is linked to. Without --project nothing is linked;
+scripts/assign_documents.py then divides the documents between the sample projects.
 
 The PDFs are expected at data/corpus/originals/<doc_id>.pdf (see scripts/fetch_corpus.py).
 Originals and extracted text go to STORAGE_ROOT (default data/storage). Each file is saved in one

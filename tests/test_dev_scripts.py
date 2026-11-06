@@ -202,6 +202,17 @@ def test_it_refuses_to_make_tokens_in_unsafe_settings(overrides: dict, message: 
         _mint(_cfg(**overrides))
 
 
+def test_the_script_can_sign_in_as_a_named_user(capsys: pytest.CaptureFixture[str]) -> None:
+    assert dev_token.main(["--user", "nair", "--role", "admin", "--project", "PRJ-001"]) == 0
+    token = capsys.readouterr().out.strip()
+    claims = jwt.decode(
+        token, settings.auth_dev_secret, algorithms=["HS256"], issuer=settings.oidc_issuer_url
+    )
+    # The person's own role and projects win over the options.
+    assert claims["sub"] == "dev-nair" and claims["email"] == "p.nair@pharma.local"
+    assert claims["realm_access"]["roles"] == ["scientist"] and claims["projects"] == ["PRJ-002"]
+
+
 def test_it_refuses_a_non_positive_lifetime() -> None:
     with pytest.raises(ValueError):
         _mint(_cfg(), minutes=0)

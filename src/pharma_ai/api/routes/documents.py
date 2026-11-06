@@ -2,6 +2,8 @@
 
 - ``PUT /api/v1/sources/{source_id}/versions``: store a PDF as a new version of an approved source.
   Administrators only. The raw PDF is the request body (no form encoding needed).
+- ``GET /api/v1/sources``: the approved-source register (held sources included) with what has been
+  stored for each and which projects may search it. Administrators only; it feeds the upload form.
 - ``GET /api/v1/projects/{project_id}/documents``: the documents a project may search, with the
   attribution text that must accompany any citation of them (ADR-002). Project members only.
 
@@ -36,7 +38,7 @@ from pharma_ai.features.documents.ingestion import (
 )
 from pharma_ai.infrastructure.audit.recorder import AuditRecorder, AuditRecorderDep
 from pharma_ai.infrastructure.db.models import DocumentVersion
-from pharma_ai.infrastructure.db.repositories import DocumentRepository
+from pharma_ai.infrastructure.db.repositories import DocumentRepository, SourceRepository
 from pharma_ai.infrastructure.db.session import get_db_session
 from pharma_ai.infrastructure.security.auth import (
     CurrentPrincipal,
@@ -81,6 +83,19 @@ class IngestedOut(VersionOut):
     source_id: str
     already_ingested: bool  # true if this exact file was stored before; nothing new was written
     project_ids: list[str]
+
+
+class RegisterEntryOut(BaseModel):
+    source_id: str
+    title: str
+    authority: str
+    version_label: str | None  # the revision as printed on the document
+    eligible: bool  # false = held: an upload is refused (409)
+    hold_reason: str | None
+    tier: str  # core, deferred or hold
+    stored: bool  # has a file been stored for this source?
+    latest_version: int | None
+    project_ids: list[str]  # the projects that may search the stored document
 
 
 class ProjectDocumentOut(BaseModel):
@@ -275,6 +290,36 @@ async def ingest_document(
     if result.already_ingested:
         response.status_code = status.HTTP_200_OK
     return result
+
+
+@router.get(
+    "/sources",
+    response_model=list[RegisterEntryOut],
+    summary="List the approved-source register (Admin only)",
+    description=(
+        "Every source in the register, held ones included, with whether a file is stored for it "
+        "and which projects may search it. The upload form is built from this list."
+    ),
+    dependencies=[Depends(require_role("admin"))],
+)
+def list_source_register(audit: AuditRecorderDep, session: SessionDep) -> list[RegisterEntryOut]:
+    entries = SourceRepository(session).list_register()
+    audit.success("SOURCE_REGISTER_LISTED", "source_register", details={"count": len(entries)})
+    return [
+        RegisterEntryOut(
+            source_id=e.source.source_id,
+            title=e.source.title,
+            authority=e.source.authority,
+            version_label=e.source.version_label,
+            eligible=e.source.eligible,
+            hold_reason=e.source.hold_reason,
+            tier=e.source.tier,
+            stored=e.document_id is not None,
+            latest_version=e.latest_version,
+            project_ids=list(e.project_ids),
+        )
+        for e in entries
+    ]
 
 
 @router.get(

@@ -75,9 +75,9 @@ class ResearchQuery(BaseModel):
         None, description="Optional filter by publisher (e.g., ['FDA', 'ICH'])"
     )
     top_k: int = Field(3, ge=1, le=10, description="Number of evidence chunks to retrieve")
-    strict_citation_mode: bool = Field(
-        True, description="Enforce zero-hallucination; flag unsupported claims as evidence gaps"
-    )
+    # There is no "strict mode" switch: an answer is always built from quotes that are checked
+    # word for word against the retrieved passages (ADR-010). Older callers that still send
+    # ``strict_citation_mode`` are not refused; the field is ignored.
 
 
 class ResearchResponse(BaseModel):

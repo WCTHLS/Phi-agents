@@ -2,8 +2,6 @@ import React, { useEffect, useState } from "react";
 import {
   checkHealth,
   Citation,
-  DocumentMetadata,
-  fetchApprovedSources,
   fetchAuditEvents,
   ResearchResponse,
   ReviewDecisionAction,
@@ -13,17 +11,29 @@ import {
   submitReviewDecision,
   fetchProjectDocuments,
   ProjectDocument,
+  fetchMyProjects,
+  fetchReviewQueue,
+  fetchSourceRegister,
+  ProjectInfo,
+  ReviewQueue,
+  RegisterEntry,
   uploadSourceDocument,
 } from "./api/client";
-import { createDevSession, OidcSession, requestDevToken, UserRole } from "./auth/oidc";
+import {
+  createDevSession,
+  DEV_PROJECT_IDS,
+  DEV_USERS,
+  OidcSession,
+  requestDevToken,
+} from "./auth/oidc";
 
-export type WorkspaceTab = "research" | "trials" | "reports" | "audit";
+export type WorkspaceTab = "research" | "trials" | "reports" | "queue" | "audit";
 
 interface AuditRecord {
   id: string;
   timestamp: string;
   actor: string;
-  role: UserRole;
+  role: string;
   project: string;
   workflowRunId: string;
   action: string;
@@ -51,16 +61,27 @@ const GOLDEN_SAMPLE_QUESTIONS: Record<string, { label: string; query: string }[]
       query:
         "What are the ICH Q1A accelerated stability storage conditions and shelf-life extrapolation rules?",
     },
+    {
+      label: "Other Project's Document Test: expect no relevant evidence (dissolution belongs to PRJ-002)",
+      query: "What pH should a dissolution medium have to simulate gastric fluid?",
+    },
   ],
   "PRJ-002": [
     {
-      label: "QTPP, CQAs & Design Space (ICH Q8)",
-      query:
-        "How does ICH Q8 define Quality Target Product Profile (QTPP), Critical Quality Attributes (CQAs), and Design Space?",
+      label: "Highly Soluble Drug Substance (ICH M9)",
+      query: "When is a drug substance considered highly soluble under ICH M9?",
     },
     {
-      label: "Class 1 Elemental Impurities Oral PDEs (ICH Q3D)",
-      query: "What are the Class 1 elemental impurities and oral PDE limits in ICH Q3D?",
+      label: "Dissolution Medium pH (FDA)",
+      query: "What pH should a dissolution medium have to simulate gastric fluid?",
+    },
+    {
+      label: "Bioequivalence Study Size (ICH M13A)",
+      query: "What should the number of subjects in a bioequivalence study be based on?",
+    },
+    {
+      label: "Other Project's Document Test: expect no relevant evidence (nitrosamines belong to PRJ-001)",
+      query: "What are the acceptable intake limits for NDMA and NDEA according to FDA?",
     },
     {
       label: "Ungrounded / Out-of-Scope Claim Test",
@@ -72,65 +93,26 @@ const GOLDEN_SAMPLE_QUESTIONS: Record<string, { label: string; query: string }[]
 
 function resolveCitationProvenance(
   cit: Citation,
-  projectDocs: ProjectDocument[],
-  sources: DocumentMetadata[]
+  projectDocs: ProjectDocument[]
 ): {
   versionLabel: string;
   sha256: string;
   attribution: string;
   authority: string;
 } {
-  const normalized = cit.source_id.toLowerCase();
-
   // A citation from the server names the exact version it quotes. That version, not the
-  // document's latest one, is what the reader must see next to the quote.
-  if (cit.sha256 && cit.version_number != null) {
-    const owner = projectDocs.find((d) => d.source_id.toLowerCase() === normalized);
-    return {
-      versionLabel: `v${cit.version_number}${cit.version_label ? ` (${cit.version_label})` : ""}`,
-      sha256: cit.sha256,
-      attribution: cit.attribution || "Attribution not recorded for this source.",
-      authority: owner?.authority ?? "Approved source",
-    };
-  }
-
-  const matchedProjectDoc = projectDocs.find(
-    (d) =>
-      d.source_id.toLowerCase() === normalized ||
-      (normalized.includes("q3d") && d.source_id.toLowerCase().includes("q3d")) ||
-      (normalized.includes("nitro") && d.source_id.toLowerCase().includes("nitro")) ||
-      (normalized.includes("q8") && d.source_id.toLowerCase().includes("q8"))
-  );
-  if (matchedProjectDoc) {
-    const ver = matchedProjectDoc.latest_version;
-    return {
-      versionLabel: `v${ver.version_number}${ver.version_label ? ` (${ver.version_label})` : ""}`,
-      sha256: ver.sha256,
-      attribution:
-        matchedProjectDoc.attribution ||
-        `Approved ${matchedProjectDoc.authority} regulatory source (${matchedProjectDoc.source_id}).`,
-      authority: matchedProjectDoc.authority,
-    };
-  }
-
-  const matchedSource = sources.find((s) => s.source_id.toLowerCase() === normalized);
-  if (matchedSource) {
-    return {
-      versionLabel: `v1 (${matchedSource.version})`,
-      sha256: matchedSource.content_hash,
-      attribution:
-        matchedSource.publisher === "ICH"
-          ? "© ICH. Reproduced in accordance with ICH copyright terms; no ICH endorsement implied."
-          : `Official ${matchedSource.publisher} guidance (${matchedSource.url_or_identifier}, ${matchedSource.publication_date}).`,
-      authority: matchedSource.publisher,
-    };
-  }
-
+  // document's latest one, is what the reader must see next to the quote. Anything the server did
+  // not record is shown as not recorded, never filled in.
+  const owner = projectDocs.find((d) => d.source_id.toLowerCase() === cit.source_id.toLowerCase());
+  const version =
+    cit.version_number != null
+      ? `v${cit.version_number}${cit.version_label ? ` (${cit.version_label})` : ""}`
+      : "not recorded";
   return {
-    versionLabel: cit.version_label || "v1 (Approved Baseline)",
+    versionLabel: version,
     sha256: cit.sha256 || "not recorded",
-    attribution: cit.attribution || "Approved regulatory source registry.",
-    authority: cit.source_id.toUpperCase().startsWith("ICH") ? "ICH" : "FDA",
+    attribution: cit.attribution || "Attribution not recorded for this source.",
+    authority: owner?.authority ?? "not recorded",
   };
 }
 
@@ -147,15 +129,31 @@ function escapeCsvCell(value: string): string {
 export function App(): React.ReactElement {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("research");
   const [selectedProject, setSelectedProject] = useState<string>("PRJ-001");
-  const [session, setSession] = useState<OidcSession | null>(() => createDevSession("scientist"));
-  const [loginRole, setLoginRole] = useState<UserRole>("scientist");
+  const [session, setSession] = useState<OidcSession | null>(() => createDevSession("thorne"));
+  const [loginUser, setLoginUser] = useState<string>("thorne");
   const [apiHealth, setApiHealth] = useState<"checking" | "ok" | "offline">("checking");
-  const [sources, setSources] = useState<DocumentMetadata[]>([]);
 
   // Document Library UI state (S2-05). Only what the API returns is shown; a failure is an error.
   const [projectDocs, setProjectDocs] = useState<ProjectDocument[]>([]);
   const [libraryError, setLibraryError] = useState<string | null>(null);
-  const [uploadSourceId, setUploadSourceId] = useState<string>("ICH-Q3DR2");
+  const [uploadSourceId, setUploadSourceId] = useState<string>("");
+  // The approved-source register from the API (administrators only); the upload form is built from it.
+  const [register, setRegister] = useState<RegisterEntry[] | null>(null);
+  // Review queue (reviewers): the project's stored questions with one review status.
+  const [queue, setQueue] = useState<ReviewQueue | null>(null);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [queueLoading, setQueueLoading] = useState<boolean>(false);
+  const [queueStatus, setQueueStatus] = useState<ReviewGateStatus>("PENDING_EXPERT_REVIEW");
+  const [queueRefresh, setQueueRefresh] = useState<number>(0);
+  const [openRunId, setOpenRunId] = useState<string>("");
+  const [queueRationale, setQueueRationale] = useState<string>("");
+  const [queueFeedback, setQueueFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+  // The signed-in person's own projects, as the API describes them (names included).
+  const [myProjects, setMyProjects] = useState<ProjectInfo[]>([]);
+  const [registerError, setRegisterError] = useState<string | null>(null);
   const [uploadVersionLabel, setUploadVersionLabel] = useState<string>("Revision 2");
   const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null);
   const [uploadLoading, setUploadLoading] = useState<boolean>(false);
@@ -170,7 +168,6 @@ export function App(): React.ReactElement {
   );
   const [publisherFilter, setPublisherFilter] = useState<string>("ALL");
   const [topK, setTopK] = useState<number>(3);
-  const [strictCitationMode, setStrictCitationMode] = useState<boolean>(true);
   // Nothing is shown until the API has answered a question the user asked.
   const [researchResult, setResearchResult] = useState<ResearchResponse | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
@@ -200,14 +197,167 @@ export function App(): React.ReactElement {
   // The page starts with a placeholder token ("dev-jwt-...") that the API rejects. It is swapped
   // for a signed one by the effect below; until then nothing should be asked of the API.
   const hasSignedToken = !!session?.accessToken && !session.accessToken.startsWith("dev-jwt-");
+  useEffect(() => {
+    if (!hasSignedToken) {
+      setMyProjects([]);
+      return;
+    }
+    let mounted = true;
+    fetchMyProjects(session?.accessToken)
+      .then((items) => {
+        if (mounted) setMyProjects(items);
+      })
+      .catch(() => {
+        if (mounted) setMyProjects([]); // the project list then shows ids only
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [session?.accessToken, hasSignedToken]);
+
+  const projectLabel = (id: string): string => {
+    const known = myProjects.find((p) => p.project_id === id);
+    if (known) return `${id}: ${known.name}`;
+    return session && !session.projectIds.includes(id) ? `${id} — no access` : id;
+  };
+
+  useEffect(() => {
+    if (session?.role !== "admin" || !hasSignedToken) {
+      setRegister(null);
+      setRegisterError(null);
+      return;
+    }
+    let mounted = true;
+    fetchSourceRegister(session.accessToken)
+      .then((items) => {
+        if (mounted) {
+          setRegister(items);
+          setRegisterError(null);
+        }
+      })
+      .catch((err) => {
+        if (mounted) {
+          setRegister(null);
+          setRegisterError(err instanceof Error ? err.message : "Could not load the register");
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [session?.role, session?.accessToken, hasSignedToken]);
+
+  // Offer first the sources already in the selected project, then the other eligible ones, and
+  // held ones last. The chosen source starts at the first of them whenever the project changes.
+  const registerOptions = [...(register ?? [])].sort((a, b) => {
+    const rank = (e: RegisterEntry) =>
+      !e.eligible ? 2 : e.project_ids.includes(selectedProject) ? 0 : 1;
+    return rank(a) - rank(b) || a.source_id.localeCompare(b.source_id);
+  });
+  useEffect(() => {
+    setUploadSourceId(registerOptions[0]?.source_id ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [register, selectedProject]);
+  const chosenSource = registerOptions.find((e) => e.source_id === uploadSourceId);
+
+  // Signing in as someone opens the first project they belong to. The project list still shows
+  // the others (marked "no access"), so choosing one shows the API refusing it.
+  const signInAs = (userKey: string) => {
+    const next = createDevSession(userKey);
+    setSession(next);
+    if (next.projectIds.length > 0 && !next.projectIds.includes(selectedProject)) {
+      setSelectedProject(next.projectIds[0]);
+    }
+  };
   // The server only accepts decisions from the reviewer role; the buttons follow the same rule.
   const canReview = session?.role === "reviewer";
+
+  useEffect(() => {
+    if (activeTab !== "queue" || !canReview || !hasSignedToken) {
+      setQueue(null);
+      setQueueError(null);
+      return;
+    }
+    let mounted = true;
+    setQueueLoading(true);
+    fetchReviewQueue(selectedProject, queueStatus, session?.accessToken)
+      .then((result) => {
+        if (mounted) {
+          setQueue(result);
+          setQueueError(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (mounted) {
+          setQueue(null);
+          setQueueError(err instanceof Error ? err.message : "The review queue could not be loaded");
+        }
+      })
+      .finally(() => {
+        if (mounted) setQueueLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [
+    activeTab,
+    canReview,
+    hasSignedToken,
+    selectedProject,
+    queueStatus,
+    queueRefresh,
+    session?.accessToken,
+  ]);
+
+  // A different project, filter or person starts with nothing open and no half-written rationale.
+  useEffect(() => {
+    setOpenRunId("");
+    setQueueRationale("");
+    setQueueFeedback(null);
+  }, [selectedProject, queueStatus, session?.userKey]);
+
+  const openRun = queue?.items.find((item) => item.run_id === openRunId);
+
+  async function handleQueueDecision(decision: ReviewDecisionAction) {
+    if (!session || !openRun) return;
+    const rationale = queueRationale.trim();
+    if (!rationale) {
+      setQueueFeedback({
+        type: "error",
+        message: "A scientific rationale is required before a decision is recorded.",
+      });
+      return;
+    }
+    setQueueFeedback(null);
+    try {
+      const entry = await submitReviewDecision(
+        {
+          workflow_run_id: openRun.run_id,
+          project_id: selectedProject,
+          decision,
+          rationale,
+        },
+        session.accessToken
+      );
+      setQueueFeedback({
+        type: "success",
+        message: `Recorded ${decision} for ${entry.workflow_run_id} (audit event ${entry.audit_event_id}).`,
+      });
+      setQueueRationale("");
+      setOpenRunId("");
+      setQueueRefresh((n) => n + 1);
+    } catch (err) {
+      setQueueFeedback({
+        type: "error",
+        message: err instanceof Error ? err.message : "The review decision was not recorded",
+      });
+    }
+  }
 
   // Automatically acquire a genuine signed dev JWT from the API backend
   useEffect(() => {
     let mounted = true;
-    if (session?.role) {
-      requestDevToken(session.role, ["PRJ-001", "PRJ-002"]).then((token) => {
+    if (session?.userKey) {
+      requestDevToken(session.userKey).then((token) => {
         if (mounted && token && token !== session.accessToken) {
           setSession((prev) => (prev ? { ...prev, accessToken: token } : null));
         }
@@ -216,7 +366,7 @@ export function App(): React.ReactElement {
     return () => {
       mounted = false;
     };
-  }, [session?.role, selectedProject]);
+  }, [session?.userKey, selectedProject]);
 
   useEffect(() => {
     let mounted = true;
@@ -226,14 +376,6 @@ export function App(): React.ReactElement {
       })
       .catch(() => {
         if (mounted) setApiHealth("offline");
-      });
-
-    fetchApprovedSources(session?.accessToken)
-      .then((items) => {
-        if (mounted && items.length > 0) setSources(items);
-      })
-      .catch(() => {
-        // Keep fallback sources when backend is not running in standalone preview
       });
 
     return () => {
@@ -260,17 +402,17 @@ export function App(): React.ReactElement {
             typeof it.details === "object" && it.details !== null
               ? (it.details as Record<string, unknown>)
               : {};
+          // A run id is shown only when the event is about a run.
           const runId =
-            (detailsObj.workflow_run_id as string) ||
-            it.resource_id ||
-            it.event_id.slice(0, 12);
+            (detailsObj.workflow_run_id as string | undefined) ||
+            (it.resource_type === "workflow_run" ? it.resource_id : null);
           return {
             id: it.event_id,
             timestamp: it.timestamp,
             actor: it.actor_id,
-            role: (it.actor_role as UserRole) || "admin",
-            project: it.project_id || "GLOBAL",
-            workflowRunId: String(runId),
+            role: it.actor_role,
+            project: it.project_id || "—",
+            workflowRunId: runId ? String(runId) : "—",
             action: it.action,
             resource: it.resource_id || it.resource_type,
             details:
@@ -323,7 +465,7 @@ export function App(): React.ReactElement {
   }, [selectedProject, session?.accessToken]);
 
   async function handleDocumentUpload() {
-    if (!selectedPdfFile) return;
+    if (!selectedPdfFile || !uploadSourceId) return;
     setUploadLoading(true);
     setUploadFeedback(null);
     try {
@@ -378,7 +520,6 @@ export function App(): React.ReactElement {
           query: question,
           project_id: selectedProject,
           top_k: topK,
-          strict_citation_mode: strictCitationMode,
         },
         session?.accessToken
       );
@@ -507,7 +648,7 @@ export function App(): React.ReactElement {
         ]
       : null;
   const activeCitationProvenance = activeCitation
-    ? resolveCitationProvenance(activeCitation, projectDocs, sources)
+    ? resolveCitationProvenance(activeCitation, projectDocs)
     : null;
 
   function renderReviewStatusBadge(status: ReviewGateStatus) {
@@ -544,8 +685,11 @@ export function App(): React.ReactElement {
               onChange={(e) => setSelectedProject(e.target.value)}
               className="header-dropdown-select"
             >
-              <option value="PRJ-001">PRJ-001: Metformin ER Nitrosamine Mitigation</option>
-              <option value="PRJ-002">PRJ-002: Oral Suspension Bioequivalence</option>
+              {[...new Set([selectedProject, ...DEV_PROJECT_IDS])].sort().map((id) => (
+                <option key={id} value={id}>
+                  {projectLabel(id)}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -568,22 +712,24 @@ export function App(): React.ReactElement {
           {session ? (
             <div className="sso-bar">
               <label className="header-control-group">
-                <span className="header-label">OIDC Role:</span>
+                <span className="header-label">Signed in as:</span>
                 <select
-                  aria-label="Switch OIDC Role"
-                  value={session.role}
-                  onChange={(e) => setSession(createDevSession(e.target.value as UserRole))}
+                  aria-label="Switch signed-in user"
+                  value={session.userKey}
+                  onChange={(e) => signInAs(e.target.value)}
                   className="header-dropdown-select"
                 >
-                  <option value="scientist">Scientist (Dr. Thorne)</option>
-                  <option value="reviewer">QA Reviewer (Dr. Vance)</option>
-                  <option value="admin">Admin (Platform Administrator)</option>
+                  {DEV_USERS.map((user) => (
+                    <option key={user.key} value={user.key}>
+                      {user.name} ({user.blurb})
+                    </option>
+                  ))}
                 </select>
               </label>
               <button
                 type="button"
                 className="btn-header-secondary"
-                onClick={() => setSession(createDevSession(session.role))}
+                onClick={() => setSession(createDevSession(session.userKey))}
               >
                 Refresh Token
               </button>
@@ -599,7 +745,7 @@ export function App(): React.ReactElement {
             <button
               type="button"
               className="btn-primary"
-              onClick={() => setSession(createDevSession(loginRole))}
+              onClick={() => signInAs(loginUser)}
             >
               OIDC Login (Keycloak PKCE)
             </button>
@@ -674,6 +820,27 @@ export function App(): React.ReactElement {
         </button>
         <button
           type="button"
+          className={activeTab === "queue" ? "nav-tab active" : "nav-tab"}
+          onClick={() => setActiveTab("queue")}
+        >
+          <svg
+            className="tab-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75zm0 5.25h.007v.008H3.75V12zm0 5.25h.007v.008H3.75v-.008z"
+            />
+          </svg>
+          <span>4. Review Queue (Reviewer)</span>
+        </button>
+        <button
+          type="button"
           className={activeTab === "audit" ? "nav-tab active" : "nav-tab"}
           onClick={() => setActiveTab("audit")}
         >
@@ -691,7 +858,7 @@ export function App(): React.ReactElement {
               d="M9 12.75L11.25 15 15 9.75m-2.25-6.75A9.004 9.004 0 003 12c0 4.298 3.01 7.893 7.058 8.78.6.13 1.284.13 1.884 0A9.004 9.004 0 0021 12c0-3.95-2.545-7.309-6.09-8.487"
             />
           </svg>
-          <span>4. Audit Log Viewer (Admin)</span>
+          <span>5. Audit Log Viewer (Admin)</span>
         </button>
       </nav>
 
@@ -712,46 +879,31 @@ export function App(): React.ReactElement {
               </p>
 
               <div className="sso-persona-grid" role="radiogroup" aria-label="Select SSO Persona">
-                <button
-                  type="button"
-                  className={
-                    loginRole === "scientist" ? "sso-persona-card active" : "sso-persona-card"
-                  }
-                  onClick={() => setLoginRole("scientist")}
-                >
-                  <div className="sso-persona-title">Dr. Thorne — Scientist</div>
-                  <div className="sso-persona-sub">a.thorne@pharma.local</div>
-                  <span className="spec-pill">Research &amp; Grounded Q&amp;A</span>
-                </button>
-                <button
-                  type="button"
-                  className={
-                    loginRole === "reviewer" ? "sso-persona-card active" : "sso-persona-card"
-                  }
-                  onClick={() => setLoginRole("reviewer")}
-                >
-                  <div className="sso-persona-title">Dr. Vance — QA Reviewer</div>
-                  <div className="sso-persona-sub">e.vance@pharma.local</div>
-                  <span className="spec-pill">Human-Review Gate Sign-Off</span>
-                </button>
-                <button
-                  type="button"
-                  className={
-                    loginRole === "admin" ? "sso-persona-card active" : "sso-persona-card"
-                  }
-                  onClick={() => setLoginRole("admin")}
-                >
-                  <div className="sso-persona-title">Admin — Platform Administrator</div>
-                  <div className="sso-persona-sub">admin@pharma.local</div>
-                  <span className="spec-pill">PDF Ingestion &amp; Audit Logs</span>
-                </button>
+                {DEV_USERS.map((user) => (
+                  <button
+                    key={user.key}
+                    type="button"
+                    className={
+                      loginUser === user.key ? "sso-persona-card active" : "sso-persona-card"
+                    }
+                    onClick={() => setLoginUser(user.key)}
+                  >
+                    <div className="sso-persona-title">
+                      {user.name} — {user.role}
+                    </div>
+                    <div className="sso-persona-sub">{user.email}</div>
+                    <span className="spec-pill">
+                      {user.projects.length > 0 ? user.projects.join(" + ") : "No project"}
+                    </span>
+                  </button>
+                ))}
               </div>
 
               <div className="sso-login-actions">
                 <button
                   type="button"
                   className="btn-primary btn-sso-large"
-                  onClick={() => setSession(createDevSession(loginRole))}
+                  onClick={() => signInAs(loginUser)}
                 >
                   Sign in with SSO (OIDC)
                 </button>
@@ -765,7 +917,7 @@ export function App(): React.ReactElement {
               <div className="two-column-grid">
                 <section className="card" aria-labelledby="sources-heading">
                   <div className="section-title-row">
-                    <h2>
+                    <h2 id="sources-heading">
                       Project Document Library — {selectedProject} ({projectDocs.length})
                     </h2>
                     <span className="spec-pill">S2-05 · ADR-007</span>
@@ -788,26 +940,29 @@ export function App(): React.ReactElement {
                           aria-label="Select Approved Source ID"
                           value={uploadSourceId}
                           onChange={(e) => setUploadSourceId(e.target.value)}
+                          disabled={registerOptions.length === 0}
                         >
-                          <option value="ICH-Q3DR2">
-                            ICH-Q3DR2 — Elemental Impurities (Eligible)
-                          </option>
-                          <option value="FDA-PV-2011">
-                            FDA-PV-2011 — Process Validation (Eligible)
-                          </option>
-                          <option value="ICH-M7R2">
-                            ICH-M7R2 — Mutagenic Impurities (Eligible)
-                          </option>
-                          <option value="ICH-M9">ICH-M9 — BCS Biowaivers (Eligible)</option>
-                          <option value="FDA-BA-2022">
-                            FDA-BA-2022 — Bioavailability Studies (Eligible)
-                          </option>
-                          <option value="ICH-Q9R1">
-                            ICH-Q9R1 — Quality Risk Management (Eligible)
-                          </option>
-                          <option value="ICH-Q8R2">
-                            ICH-Q8R2 — Pharm Dev (HELD — Tests 409 Rule)
-                          </option>
+                          {registerOptions.length === 0 && (
+                            <option value="">
+                              {session?.role !== "admin"
+                                ? "Sign in as the administrator to upload"
+                                : registerError
+                                  ? "Register unavailable"
+                                  : "Loading the register..."}
+                            </option>
+                          )}
+                          {registerOptions.map((entry) => (
+                            <option key={entry.source_id} value={entry.source_id}>
+                              {entry.source_id} — {entry.title}
+                              {!entry.eligible
+                                ? " (HELD: upload will be refused)"
+                                : !entry.stored
+                                  ? " (not loaded yet)"
+                                  : entry.project_ids.length > 0
+                                    ? ` (in ${entry.project_ids.join(", ")})`
+                                    : " (in no project)"}
+                            </option>
+                          ))}
                         </select>
                       </label>
                       <label>
@@ -821,6 +976,30 @@ export function App(): React.ReactElement {
                         />
                       </label>
                     </div>
+                    {registerError && (
+                      <div className="upload-status error" role="alert">
+                        {registerError}
+                      </div>
+                    )}
+                    {chosenSource && !chosenSource.eligible && (
+                      <div className="upload-status error" role="status">
+                        {chosenSource.source_id} is held
+                        {chosenSource.hold_reason ? `: ${chosenSource.hold_reason}` : ""}. The
+                        server will refuse this upload.
+                      </div>
+                    )}
+                    {chosenSource &&
+                      chosenSource.eligible &&
+                      chosenSource.stored &&
+                      !chosenSource.project_ids.includes(selectedProject) && (
+                        <div className="upload-status error" role="status">
+                          {chosenSource.source_id} is{" "}
+                          {chosenSource.project_ids.length > 0
+                            ? `searchable only in ${chosenSource.project_ids.join(", ")}`
+                            : "not linked to any project"}
+                          . Uploading it here will also make it searchable in {selectedProject}.
+                        </div>
+                      )}
                     <div className="file-dropzone">
                       <label className="file-dropzone-label" htmlFor="regulatory-pdf-upload">
                         <div className="dropzone-icon-box">
@@ -862,7 +1041,7 @@ export function App(): React.ReactElement {
                         <button
                           type="button"
                           className="btn-primary"
-                          disabled={uploadLoading || !selectedPdfFile}
+                          disabled={uploadLoading || !selectedPdfFile || !uploadSourceId}
                           onClick={() => handleDocumentUpload()}
                         >
                           {uploadLoading ? "Extracting..." : "Upload Selected PDF"}
@@ -925,14 +1104,16 @@ export function App(): React.ReactElement {
 
                             <div className="doc-badges">
                               <span className={isStatusOk ? "badge-verified" : "badge-unverified"}>
-                                Status: {(ver.extraction_status || "ok").toUpperCase()} (Extracted)
+                                {ver.extraction_status
+                                  ? `Status: ${ver.extraction_status.toUpperCase()} (Extracted)`
+                                  : "Status: NOT RECORDED"}
                               </span>
                               <span
                                 className={isTextLayerFull ? "badge-verified" : "badge-warning"}
                               >
                                 {isTextLayerFull
                                   ? "Text Layer: YES (Selectable)"
-                                  : `⚠ Uncertainty Flag: Text Layer ${(ver.text_layer || "no").toUpperCase()}`}
+                                  : `⚠ Uncertainty Flag: Text Layer ${(ver.text_layer || "not recorded").toUpperCase()}`}
                               </span>
                               <span className="hash-code">
                                 Latest: v{ver.version_number}
@@ -947,7 +1128,7 @@ export function App(): React.ReactElement {
                               </div>
                               <div className="meta-grid-item">
                                 <span className="meta-item-label">Engine</span>
-                                <span className="meta-item-value">{ver.extraction_method ?? "pypdf"}</span>
+                                <span className="meta-item-value">{ver.extraction_method ?? "not recorded"}</span>
                               </div>
                               <div className="meta-grid-item">
                                 <span className="meta-item-label">Size</span>
@@ -958,7 +1139,7 @@ export function App(): React.ReactElement {
                                 <span
                                   className={`meta-item-value ${isTextLayerFull ? "text-emerald" : "text-amber"}`}
                                 >
-                                  {isTextLayerFull ? "YES" : (ver.text_layer || "no").toUpperCase()}
+                                  {isTextLayerFull ? "YES" : (ver.text_layer || "not recorded").toUpperCase()}
                                 </span>
                               </div>
                             </div>
@@ -1002,7 +1183,7 @@ export function App(): React.ReactElement {
                                         {v.version_label ? ` — ${v.version_label}` : ""}
                                       </span>
                                       <span className="timeline-meta">
-                                        ({v.page_count ?? 0}p, {v.extraction_status || "ok"})
+                                        ({v.page_count ?? "?"}p, {v.extraction_status ?? "status not recorded"})
                                       </span>
                                       <code className="timeline-hash">
                                         SHA-256: {v.sha256.slice(0, 12)}...
@@ -1015,31 +1196,6 @@ export function App(): React.ReactElement {
                           </li>
                         );
                       })}
-                  </ul>
-
-                  <hr className="section-divider" />
-                  <h2 id="sources-heading">Approved Regulatory Sources ({sources.length})</h2>
-                  <p className="muted">
-                    Only license-verified documents with cryptographic SHA-256 provenance are
-                    eligible for retrieval.
-                  </p>
-                  <ul className="source-list">
-                    {sources.map((src) => (
-                      <li key={src.source_id} className="source-item">
-                        <div className="source-header">
-                          <span className="publisher-tag">{src.publisher}</span>
-                          <strong>{src.title}</strong>
-                        </div>
-                        <div className="source-meta">
-                          <span>ID: {src.url_or_identifier}</span>
-                          <span>Date: {src.publication_date}</span>
-                          <span>Version: {src.version}</span>
-                        </div>
-                        <code className="hash-code" title="SHA-256 Provenance Fingerprint">
-                          SHA-256: {src.content_hash.slice(0, 24)}...
-                        </code>
-                      </li>
-                    ))}
                   </ul>
                 </section>
 
@@ -1141,14 +1297,6 @@ export function App(): React.ReactElement {
                             <option value={5}>Top 5</option>
                           </select>
                         </label>
-                        <label className="checkbox-inline">
-                          <input
-                            type="checkbox"
-                            checked={strictCitationMode}
-                            onChange={(e) => setStrictCitationMode(e.target.checked)}
-                          />
-                          Strict Zero-Hallucination Mode
-                        </label>
                       </div>
                       <button
                         type="submit"
@@ -1160,6 +1308,11 @@ export function App(): React.ReactElement {
                       </button>
                     </div>
                   </form>
+                  <p className="muted">
+                    Answers are built only from quotes that appear word for word in the retrieved
+                    passages. “Verified” means the quotes are really in the documents. It does not
+                    mean they answer the question or are scientifically correct.
+                  </p>
 
                   {!hasSignedToken && (
                     <div className="upload-status error" role="alert">
@@ -1200,11 +1353,17 @@ export function App(): React.ReactElement {
                         <div className="doc-badges">
                           <span
                             className={
-                              researchResult.verified ? "badge-verified" : "badge-unverified"
+                              !researchResult.verified
+                                ? "badge-unverified"
+                                : researchResult.evidence_gaps.length > 0
+                                  ? "badge-warning"
+                                  : "badge-verified"
                             }
                           >
                             {researchResult.verified
-                              ? `✓ GROUNDED IN ${researchResult.citations.length} CITATION(S)`
+                              ? researchResult.evidence_gaps.length > 0
+                                ? `⚠ PARTLY SUPPORTED: ${researchResult.citations.length} CITATION(S), BUT GAPS ARE FLAGGED BELOW`
+                                : `✓ GROUNDED IN ${researchResult.citations.length} CITATION(S)`
                               : researchResult.citations.length > 0
                                 ? "⚠ PARTLY UNVERIFIED: some quotes were removed (see the gaps below)"
                                 : "⚠ UNSUPPORTED / WITHHELD (FAIL-CLOSED)"}
@@ -1215,7 +1374,7 @@ export function App(): React.ReactElement {
                           className="lexical-score-pill"
                           title="Share of the question's distinctive words found in the quoted text. A coverage figure, not a probability that the answer is right."
                         >
-                          Lexical Overlap Score:{" "}
+                          Question Words Found in Quotes:{" "}
                           {(researchResult.confidence_score * 100).toFixed(0)}%
                         </span>
                       </div>
@@ -1223,7 +1382,7 @@ export function App(): React.ReactElement {
                       {/* Synthesized Answer with Inline Clickable Citation Badges */}
                       <div className="synthesized-answer-panel">
                         <div className="synthesized-answer-header">
-                          <strong>Synthesized Grounded Answer:</strong>
+                          <strong>Quoted Evidence:</strong>
                           {researchResult.citations.length > 0 && (
                             <div className="inline-citation-strip" aria-label="Inline Citations">
                               <span>Jump to Citation:</span>
@@ -1258,7 +1417,7 @@ export function App(): React.ReactElement {
                           <div className="citation-inspector-grid">
                             <div className="citation-list-col">
                               {researchResult.citations.map((cit, idx) => {
-                                const prov = resolveCitationProvenance(cit, projectDocs, sources);
+                                const prov = resolveCitationProvenance(cit, projectDocs);
                                 const isSelected = selectedCitationIndex === idx;
                                 return (
                                   <div
@@ -1695,6 +1854,213 @@ export function App(): React.ReactElement {
             )}
 
             {/* VIEW 4: ADMIN AUDIT LOG VIEWER (S1-12 & S2-11) */}
+            {/* VIEW 4: REVIEW QUEUE (S2-10) */}
+            {activeTab === "queue" && (
+              <section className="card" aria-labelledby="queue-heading">
+                <div className="section-title-row">
+                  <h2 id="queue-heading">Review Queue — {selectedProject}</h2>
+                  <span className="spec-pill">S2-10 · NFR-12 · FR-27</span>
+                </div>
+                {!canReview ? (
+                  <p className="muted">
+                    Only a reviewer can see the questions waiting for review. Sign in as a reviewer
+                    (the server checks this too, and only for the reviewer's own projects).
+                  </p>
+                ) : (
+                  <>
+                    <div className="queue-controls">
+                      <label className="field-label" htmlFor="queue-status">
+                        Show:{" "}
+                        <select
+                          id="queue-status"
+                          value={queueStatus}
+                          onChange={(e) => setQueueStatus(e.target.value as ReviewGateStatus)}
+                        >
+                          <option value="PENDING_EXPERT_REVIEW">Waiting for review</option>
+                          <option value="APPROVED">Approved</option>
+                          <option value="REJECTED">Rejected</option>
+                          <option value="EVIDENCE_REQUESTED">More evidence requested</option>
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        className="btn-header-outline"
+                        onClick={() => setQueueRefresh((n) => n + 1)}
+                        disabled={queueLoading}
+                      >
+                        {queueLoading ? "Loading..." : "Refresh"}
+                      </button>
+                      {queue && (
+                        <span className="muted">
+                          {queue.total} question(s)
+                          {queue.total > queue.items.length
+                            ? `, showing the first ${queue.items.length}`
+                            : ""}
+                          {queue.status === "PENDING_EXPERT_REVIEW" ? ", longest waiting first" : ""}
+                        </span>
+                      )}
+                    </div>
+                    {queueError && (
+                      <div className="upload-status error" role="alert">
+                        {queueError}
+                      </div>
+                    )}
+                    {queueFeedback && (
+                      <div
+                        className={`upload-status ${queueFeedback.type}`}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {queueFeedback.message}
+                      </div>
+                    )}
+                    {queue && queue.items.length === 0 && !queueError && (
+                      <p className="muted">
+                        {queue.status === "PENDING_EXPERT_REVIEW"
+                          ? "Nothing is waiting for review in this project."
+                          : "No questions with this status in this project."}
+                      </p>
+                    )}
+                    <div className="two-column-grid">
+                      <ul className="source-list queue-list" aria-label="Stored questions">
+                        {(queue?.items ?? []).map((item) => (
+                          <li key={item.run_id} className="source-item">
+                            <button
+                              type="button"
+                              className={
+                                item.run_id === openRunId ? "queue-item active" : "queue-item"
+                              }
+                              onClick={() => {
+                                setOpenRunId(item.run_id);
+                                setQueueFeedback(null);
+                              }}
+                            >
+                              <strong>{item.question}</strong>
+                              <span className="muted">
+                                Asked by {item.asked_by} ·{" "}
+                                {new Date(item.created_at).toLocaleString()}
+                              </span>
+                              <span className="doc-badges">
+                                <span
+                                  className={
+                                    item.withheld
+                                      ? "badge-unverified"
+                                      : item.evidence_gaps.length > 0
+                                        ? "badge-warning"
+                                        : "badge-verified"
+                                  }
+                                >
+                                  {item.withheld
+                                    ? "No answer given"
+                                    : item.evidence_gaps.length > 0
+                                      ? "Partly supported"
+                                      : "Quotes verified"}
+                                </span>
+                                <span className="hash-code">{item.run_id}</span>
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="queue-detail" aria-live="polite">
+                        {!openRun ? (
+                          <p className="muted">
+                            Choose a question to read its answer and evidence.
+                          </p>
+                        ) : (
+                          <>
+                            <h3>{openRun.question}</h3>
+                            <div className="doc-badges">
+                              <span className="hash-code">{openRun.run_id}</span>
+                              <span className="hash-code">Mode: {openRun.answer_mode}</span>
+                              <span className="hash-code">
+                                Question words found in quotes: {(openRun.coverage * 100).toFixed(0)}
+                                %
+                              </span>
+                              {openRun.decided_by && (
+                                <span className="hash-code">
+                                  {openRun.status} by {openRun.decided_by}
+                                </span>
+                              )}
+                            </div>
+                            <div className="synthesized-answer-panel">
+                              <div className="synthesized-answer-header">
+                                <strong>Quoted Evidence:</strong>
+                              </div>
+                              <p className="answer-text">{openRun.answer}</p>
+                            </div>
+                            {openRun.citations.map((cit, index) => (
+                              <div key={`${cit.source_id}-${index}`} className="attribution-note">
+                                <strong>
+                                  [{index + 1}] {cit.title} — {cit.source_id}, v{cit.version_number}
+                                  {cit.version_label ? ` (${cit.version_label})` : ""}, page{" "}
+                                  {pageLabel(cit.page, cit.page_end)}
+                                </strong>
+                                {cit.section ? <div className="muted">{cit.section}</div> : null}
+                                <em>“{cit.quoted_evidence}”</em>
+                                <div className="hash-code">
+                                  SHA-256: {cit.sha256.slice(0, 24)}...
+                                </div>
+                              </div>
+                            ))}
+                            {openRun.evidence_gaps.length > 0 && (
+                              <div className="upload-status error">
+                                <strong>Evidence gaps:</strong>
+                                <ul>
+                                  {openRun.evidence_gaps.map((gap) => (
+                                    <li key={gap}>{gap}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            <label htmlFor="queue-rationale" className="field-label">
+                              Reviewer Scientific Rationale (Mandatory for Audit Trail):
+                            </label>
+                            <textarea
+                              id="queue-rationale"
+                              rows={3}
+                              value={queueRationale}
+                              onChange={(e) => setQueueRationale(e.target.value)}
+                              placeholder="State scientific/regulatory verification rationale..."
+                            />
+                            <div className="button-group">
+                              <button
+                                type="button"
+                                className="btn-approve"
+                                disabled={openRun.withheld}
+                                title={
+                                  openRun.withheld
+                                    ? "No answer was given, so there is nothing to approve"
+                                    : undefined
+                                }
+                                onClick={() => handleQueueDecision("APPROVED")}
+                              >
+                                Approve Cited Answer
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-danger"
+                                onClick={() => handleQueueDecision("REJECTED")}
+                              >
+                                Reject Answer
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-warning-action"
+                                onClick={() => handleQueueDecision("EVIDENCE_REQUESTED")}
+                              >
+                                Request More Evidence
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
+
             {activeTab === "audit" && (
               <section className="card" aria-labelledby="audit-heading">
                 <div className="section-title-row">

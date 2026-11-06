@@ -10,18 +10,25 @@ import hashlib
 import io
 import json
 import os
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from alembic import command
-from pdf_factory import make_pdf
+from pdf_factory import make_pdf, make_pdf_from_streams
 from pypdf import PdfReader, PdfWriter
 from sqlalchemy import Engine, create_engine, func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 from test_db_integration import _alembic_config
 
+from pharma_ai.features.documents.extraction import (
+    ExtractionResult,
+    PageText,
+    classify,
+    clean_text,
+)
 from pharma_ai.features.documents.ingestion import (
     DocumentIngestionService,
     EmptyFile,
@@ -30,7 +37,10 @@ from pharma_ai.features.documents.ingestion import (
     ProjectNotFound,
     SourceNotEligible,
     SourceNotFound,
+    StoredOriginalUnusable,
     UnreadablePdf,
+    VersionNotFound,
+    extracted_key,
 )
 from pharma_ai.infrastructure.db.models import (
     Document,
@@ -322,3 +332,118 @@ def test_a_failure_after_the_files_are_stored_leaves_no_rows_and_a_retry_works(
     assert result.version_number == 1 and not result.already_ingested
     assert _stored_files(store) == files_after_failure  # same names, same bytes: nothing doubled
     assert _count(session, DocumentVersion) == 1
+
+
+# --- reading a stored original again ---------------------------------------------------------
+
+# "a theoretical 10" then a smaller, raised "-5", as ICH M7 draws its exponents.
+EXPONENT_PAGE = (
+    b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (a theoretical 10) Tj /F1 8 Tf 1 0 0 1 154.1 704.6 Tm "
+    b"(-) Tj 1 0 0 1 156.8 704.6 Tm (5) Tj /F1 12 Tf 1 0 0 1 161.3 700 Tm "
+    b"( excess lifetime risk of cancer) Tj ET"
+)
+OLD_TEXT = "a theoretical 10-5 excess lifetime risk of cancer"
+NEW_TEXT = "a theoretical 10⁻⁵ excess lifetime risk of cancer"
+
+
+def _old_extractor(data: bytes) -> ExtractionResult:
+    """How text was read before superscripts were kept: pypdf's own text."""
+    reader = PdfReader(io.BytesIO(data))
+    pages = [PageText(n, clean_text(p.extract_text())) for n, p in enumerate(reader.pages, 1)]
+    return classify("pypdf", pages, [])
+
+
+def _ingest_the_old_way(session: Session, store: LocalFolderStore, pdf: bytes):
+    service = DocumentIngestionService(
+        session, store, max_bytes=5_000_000, extractor=_old_extractor
+    )
+    return service.ingest(source_id=ELIGIBLE, data=pdf)
+
+
+def _page_texts(store: LocalFolderStore, key: str) -> list[str]:
+    return [p["text"] for p in json.loads(store.get(key))["pages"]]
+
+
+def test_reading_again_stores_the_new_text_beside_the_old_and_points_the_version_at_it(
+    session: Session, store: LocalFolderStore
+) -> None:
+    plain_page = b"BT /F1 11 Tf 72 720 Td (Class 1 elements: arsenic, cadmium and lead) Tj ET"
+    pdf = make_pdf_from_streams([EXPONENT_PAGE, plain_page])
+    first = _ingest_the_old_way(session, store, pdf)
+    assert _page_texts(store, first.extracted_key)[0] == OLD_TEXT
+
+    result = _service(session, store).reextract(first.version_id)
+
+    assert result.changed and result.changed_pages == (1,)  # page 2 has no superscript
+    assert result.previous_key == first.extracted_key == extracted_key(ELIGIBLE, first.sha256)
+    assert result.extracted_key != result.previous_key
+    assert result.extracted_key.startswith(f"extracted/{ELIGIBLE}/{first.sha256}.")
+    assert _page_texts(store, result.extracted_key)[0] == NEW_TEXT
+    assert _page_texts(store, result.previous_key)[0] == OLD_TEXT  # the old text is kept
+    assert store.get(first.object_key) == pdf  # the original is untouched
+    version = session.get(DocumentVersion, first.version_id)
+    assert version is not None and version.extracted_key == result.extracted_key
+    assert (version.extraction_method, version.extraction_status) == ("pypdf", "ok")
+
+
+def test_reading_again_when_nothing_is_new_changes_nothing(
+    session: Session, store: LocalFolderStore
+) -> None:
+    first = _service(session, store).ingest(source_id=ELIGIBLE, data=make_pdf(PAGES))
+    files = _stored_files(store)
+    result = _service(session, store).reextract(first.version_id)
+    assert not result.changed and result.changed_pages == ()
+    assert result.extracted_key == result.previous_key == first.extracted_key
+    assert _stored_files(store) == files
+
+
+def test_a_dry_run_reports_the_change_but_stores_and_changes_nothing(
+    session: Session, store: LocalFolderStore
+) -> None:
+    first = _ingest_the_old_way(session, store, make_pdf_from_streams([EXPONENT_PAGE]))
+    files = _stored_files(store)
+    result = _service(session, store).reextract(first.version_id, dry_run=True)
+    assert result.changed and result.changed_pages == (1,)
+    assert result.extracted_key == first.extracted_key
+    assert _stored_files(store) == files
+    version = session.get(DocumentVersion, first.version_id)
+    assert version is not None and version.extracted_key == first.extracted_key
+
+
+def test_reading_again_refuses_an_original_that_is_missing_or_was_altered(
+    session: Session, store: LocalFolderStore
+) -> None:
+    first = _ingest_the_old_way(session, store, make_pdf_from_streams([EXPONENT_PAGE]))
+    path = store.root / first.object_key
+    path.write_bytes(make_pdf(PAGES))  # altered behind the store's back
+    with pytest.raises(StoredOriginalUnusable, match="fingerprint"):
+        _service(session, store).reextract(first.version_id)
+    path.unlink()
+    with pytest.raises(StoredOriginalUnusable, match="not in the store"):
+        _service(session, store).reextract(first.version_id)
+    version = session.get(DocumentVersion, first.version_id)
+    assert version is not None and version.extracted_key == first.extracted_key
+
+
+def test_reading_again_an_unknown_version_is_refused(
+    session: Session, store: LocalFolderStore
+) -> None:
+    with pytest.raises(VersionNotFound):
+        _service(session, store).reextract(uuid.uuid4())
+
+
+def test_ingesting_works_when_the_store_still_holds_an_older_text_of_the_same_file(
+    session: Session, store: LocalFolderStore
+) -> None:
+    # For example, the database was rebuilt but the storage folder was kept from before
+    # superscripts were marked: the old text sits under the name the new text would get.
+    pdf = make_pdf_from_streams([EXPONENT_PAGE])
+    sha = hashlib.sha256(pdf).hexdigest()
+    old = json.dumps(_old_extractor(pdf).to_dict(), ensure_ascii=False).encode()
+    store.put(extracted_key(ELIGIBLE, sha), old)
+
+    result = _service(session, store).ingest(source_id=ELIGIBLE, data=pdf)
+
+    assert result.extracted_key != extracted_key(ELIGIBLE, sha)
+    assert _page_texts(store, result.extracted_key) == [NEW_TEXT]
+    assert store.get(extracted_key(ELIGIBLE, sha)) == old

@@ -28,8 +28,11 @@ from pharma_ai.infrastructure.embeddings import Embedder
 # The usual constant for reciprocal rank fusion. A larger value makes the lists count more equally;
 # 60 comes from the original method and has not been tuned on this corpus.
 RRF_K = 60
-# How many passages each search contributes before merging.
-CANDIDATE_DEPTH = 20
+# How many passages each search contributes before merging. A passage that one search ranks
+# well but the other ranks beyond this depth earns nothing from the second list. At 20, the
+# ICH Q3D table of Class 1 PDEs (third by meaning, 25th by keywords) fell out of the top 3 and
+# the question went unanswered (decision log D26). 50 keeps the golden-question totals the same.
+CANDIDATE_DEPTH = 50
 
 
 @dataclass(frozen=True)

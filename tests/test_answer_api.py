@@ -32,6 +32,7 @@ from test_llm_writer import FakeModel, picks
 from pharma_ai.features.research.answer_workflow import NO_EVIDENCE_ANSWER
 from pharma_ai.features.research.answer_writer import AnswerWriter
 from pharma_ai.features.research.llm_writer import LlmQuoteWriter
+from pharma_ai.features.research.schemas import ResearchQuery
 from pharma_ai.features.research.writer_factory import get_answer_writer
 from pharma_ai.infrastructure.audit.service import AuditUnavailableError, get_audit_service
 from pharma_ai.infrastructure.db.models import WorkflowRun
@@ -144,6 +145,27 @@ def test_top_k_limits_the_passages_returned(
 
 
 # --- when there is no evidence ------------------------------------------------------------------
+
+
+def test_there_is_no_strict_mode_switch_and_an_old_caller_that_sends_one_is_not_refused(
+    api: TestClient, session: Session, embedder: FakeEmbedder
+) -> None:
+    # Answers are always built from verified quotes. Callers that still send the old setting get
+    # the same answer either way, and it is not recorded.
+    add_document(session, embedder, NITRO, "PRJ-001", [PASSAGE, "Unrelated filler text."])
+    on = ask(api, MEMBER_1, strict_citation_mode=True)
+    off = ask(api, MEMBER_1, strict_citation_mode=False)
+    assert on.status_code == off.status_code == 200
+    assert on.json()["answer"] == off.json()["answer"] and on.json()["verified"] is True
+    assert "strict_citation_mode" not in ResearchQuery.model_fields
+    for event in events(api, action="RESEARCH_QUERY_EXECUTED", resource_type="workflow_run"):
+        assert "strict_citation_mode" not in event["details"]
+
+
+def test_the_sample_mode_audit_record_does_not_hold_the_old_setting(api: TestClient) -> None:
+    assert ask(api, MEMBER_1, project=None, strict_citation_mode=False).status_code == 200
+    (event,) = events(api, action="RESEARCH_QUERY_EXECUTED", resource_type="research_query")
+    assert "strict_citation_mode" not in event["details"]
 
 
 def test_a_question_the_documents_cannot_answer_is_withheld_not_guessed(

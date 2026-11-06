@@ -203,7 +203,9 @@ class Document(Base):
 
 
 class DocumentVersion(Base):
-    """One stored original file. Never edited; a new revision is a new version."""
+    """One stored original file; a new revision is a new version. The file and its fingerprint
+    never change. The extraction fields describe the text read from it and change only when the
+    file is read again with a newer extractor (re-extraction, recorded in the audit trail)."""
 
     __tablename__ = "document_versions"
 

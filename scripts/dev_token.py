@@ -4,6 +4,9 @@
 Usage (from the repository root, inside the dev container so the settings are loaded):
     docker compose run --rm dev python scripts/dev_token.py --role admin
     docker compose run --rm dev python scripts/dev_token.py --role scientist --project PRJ-001
+    docker compose run --rm dev python scripts/dev_token.py --user nair
+(--user signs in as one of the named development users, with that person's role and projects;
+see src/pharma_ai/infrastructure/security/dev_users.py)
 or on your own machine, with the project installed (pip install -e ".[dev]") and a .env file:
     python scripts/dev_token.py --role admin
 
@@ -22,11 +25,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from pharma_ai.core.config import settings
 from pharma_ai.infrastructure.security.auth import mint_dev_token
+from pharma_ai.infrastructure.security.dev_users import DEV_USERS
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--user",
+        choices=sorted(DEV_USERS),
+        help="a named development user; their role, projects, id and email replace the options below",
     )
     parser.add_argument("--sub", default="dev-user", help="stable user ID (default: dev-user)")
     parser.add_argument("--email", default=None, help="default: <sub>@pharma.local")
@@ -46,14 +55,15 @@ def main(argv: list[str] | None = None) -> int:
         "--minutes", type=int, default=60, help="how long the token is valid (default: 60)"
     )
     args = parser.parse_args(argv)
+    if args.user:
+        person = DEV_USERS[args.user]
+        sub, email, roles, projects = person.sub, person.email, [person.role], list(person.projects)
+    else:
+        sub, email = args.sub, args.email
+        roles, projects = args.roles or ["scientist"], args.projects or ["PRJ-001"]
     try:
         token = mint_dev_token(
-            settings,
-            sub=args.sub,
-            email=args.email,
-            roles=args.roles or ["scientist"],
-            projects=args.projects or ["PRJ-001"],
-            minutes=args.minutes,
+            settings, sub=sub, email=email, roles=roles, projects=projects, minutes=args.minutes
         )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)

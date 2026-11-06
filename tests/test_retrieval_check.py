@@ -220,6 +220,18 @@ def test_a_run_scores_what_can_be_scored_and_lists_the_rest(
 
 
 @needs_db
+def test_without_a_project_every_sample_project_is_searched_together(
+    engine: Engine, tmp_path: Path, questions_file: Path
+) -> None:
+    # Each document belongs to one project, so measuring the corpus means searching them all.
+    _, out = run(tmp_path, questions_file)
+    assert "projects PRJ-001, PRJ-002" in out
+    _, only_one = run(tmp_path, questions_file, "--project", "PRJ-002")
+    assert "projects PRJ-002" in only_one
+    assert "The search returned no results at all" in only_one  # its documents are in PRJ-001
+
+
+@needs_db
 def test_the_search_can_be_wrong_and_the_report_says_so(
     engine: Engine, tmp_path: Path, questions_file: Path
 ) -> None:
