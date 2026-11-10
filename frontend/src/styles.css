@@ -1575,3 +1575,37 @@ textarea:focus {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+
+/* Role-Separated Workspace Navigation & Traceability Styles */
+.workspace-nav {
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.workspace-nav-tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.workspace-mode-indicator {
+  display: flex;
+  align-items: center;
+  padding: 0.35rem 0;
+}
+
+.trace-citation-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.trace-cit-pill {
+  background: #f8fafc;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.78rem;
+}

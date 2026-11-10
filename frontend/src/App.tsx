@@ -14,6 +14,9 @@ import {
   fetchMyProjects,
   fetchReviewQueue,
   ProjectInfo,
+  QueuedRun,
+  RegisterEntry,
+  IngestedDocumentResponse,
   ReviewQueue,
 } from "./api/client";
 import {
@@ -24,7 +27,72 @@ import {
   requestDevToken,
 } from "./auth/oidc";
 
-export type WorkspaceTab = "research" | "trials" | "reports" | "queue" | "audit";
+export type WorkspaceTab =
+  | "research"
+  | "trials"
+  | "reports"
+  | "queue"
+  | "traceability"
+  | "admin-docs"
+  | "audit"
+  | "admin-access";
+
+const ADMIN_API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
+async function loadAdminSourceCatalog(accessToken?: string): Promise<RegisterEntry[]> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+  const response = await fetch(`${ADMIN_API_BASE}/api/v1/sources`, { headers });
+  if (!response.ok) {
+    throw new Error(`Failed to load the approved-source register (${response.status})`);
+  }
+  return (await response.json()) as RegisterEntry[];
+}
+
+async function putAdminSourceVersion(params: {
+  sourceId: string;
+  projectId: string;
+  fileBytes: ArrayBuffer | Uint8Array;
+  versionLabel?: string;
+  accessToken?: string;
+}): Promise<IngestedDocumentResponse> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/pdf",
+    Accept: "application/json",
+  };
+  if (params.accessToken) {
+    headers.Authorization = `Bearer ${params.accessToken}`;
+  }
+  const query = new URLSearchParams();
+  if (params.projectId) {
+    query.append("project_id", params.projectId);
+  }
+  if (params.versionLabel && params.versionLabel.trim()) {
+    query.append("version_label", params.versionLabel.trim());
+  }
+  const qs = query.toString() ? `?${query.toString()}` : "";
+  const response = await fetch(
+    `${ADMIN_API_BASE}/api/v1/sources/${encodeURIComponent(params.sourceId)}/versions${qs}`,
+    {
+      method: "PUT",
+      headers,
+      body: params.fileBytes as BodyInit,
+    }
+  );
+  if (!response.ok) {
+    let detail = `Upload failed (${response.status})`;
+    try {
+      const errJson = (await response.json()) as { detail?: string };
+      if (errJson?.detail) detail = `${response.status}: ${errJson.detail}`;
+    } catch {
+      // keep default status text
+    }
+    throw new Error(detail);
+  }
+  return (await response.json()) as IngestedDocumentResponse;
+}
 
 interface AuditRecord {
   id: string;
@@ -198,17 +266,196 @@ export function App(): React.ReactElement {
     return session && !session.projectIds.includes(id) ? `${id} — no access` : id;
   };
 
-  // Signing in as someone opens the first project they belong to. The project list still shows
-  // the others (marked "no access"), so choosing one shows the API refusing it.
+  // Admin / Data Owner Console state (FR-04 / ADR-007)
+  const [register, setRegister] = useState<RegisterEntry[] | null>(null);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [adminSourceId, setAdminSourceId] = useState<string>("");
+  const [adminVersionLabel, setAdminVersionLabel] = useState<string>("Revision 2");
+  const [adminPdfFile, setAdminPdfFile] = useState<File | null>(null);
+  const [adminIngestLoading, setAdminIngestLoading] = useState<boolean>(false);
+  const [adminIngestFeedback, setAdminIngestFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+
+  // Reviewer Project-Scoped Read-Only Audit & Traceability state (US-14 / §9.4)
+  const [traceRuns, setTraceRuns] = useState<QueuedRun[]>([]);
+  const [traceLoading, setTraceLoading] = useState<boolean>(false);
+  const [traceError, setTraceError] = useState<string | null>(null);
+  const [traceStatusFilter, setTraceStatusFilter] = useState<"ALL" | ReviewGateStatus>("ALL");
+  const [traceSearch, setTraceSearch] = useState<string>("");
+  const [traceRefresh, setTraceRefresh] = useState<number>(0);
+
+  // Signing in as someone opens the first project they belong to and switches to their role's console.
   const signInAs = (userKey: string) => {
     const next = createDevSession(userKey);
     setSession(next);
     if (next.projectIds.length > 0 && !next.projectIds.includes(selectedProject)) {
       setSelectedProject(next.projectIds[0]);
     }
+    if (next.role === "admin") {
+      setActiveTab("admin-docs");
+    } else if (next.role === "scientist") {
+      setActiveTab("research");
+    } else if (next.role === "reviewer") {
+      setActiveTab("research");
+    }
   };
   // The server only accepts decisions from the reviewer role; the buttons follow the same rule.
   const canReview = session?.role === "reviewer";
+
+  // Enforce role-separated views (Least Privilege per §4.1, §4.2, §15)
+  useEffect(() => {
+    if (!session) return;
+    if (session.role === "admin") {
+      if (!["admin-docs", "audit", "admin-access"].includes(activeTab)) {
+        setActiveTab("admin-docs");
+      }
+    } else if (session.role === "scientist") {
+      if (!["research", "trials", "reports"].includes(activeTab)) {
+        setActiveTab("research");
+      }
+    } else if (session.role === "reviewer") {
+      if (!["research", "trials", "reports", "queue", "traceability"].includes(activeTab)) {
+        setActiveTab("research");
+      }
+    }
+  }, [session, activeTab]);
+
+  // Load the approved-source register for Admin / Data Owner Console
+  useEffect(() => {
+    if (session?.role !== "admin" || !hasSignedToken) {
+      setRegister(null);
+      setRegisterError(null);
+      return;
+    }
+    let mounted = true;
+    loadAdminSourceCatalog(session.accessToken)
+      .then((items) => {
+        if (mounted) {
+          setRegister(items);
+          setRegisterError(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (mounted) {
+          setRegister(null);
+          setRegisterError(err instanceof Error ? err.message : "Could not load the register");
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [session?.role, session?.accessToken, hasSignedToken]);
+
+  const registerOptions = [...(register ?? [])].sort((a, b) => {
+    const rank = (e: RegisterEntry) =>
+      !e.eligible ? 2 : e.project_ids.includes(selectedProject) ? 0 : 1;
+    return rank(a) - rank(b) || a.source_id.localeCompare(b.source_id);
+  });
+
+  useEffect(() => {
+    setAdminSourceId(registerOptions[0]?.source_id ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [register, selectedProject]);
+
+  const chosenAdminSource = registerOptions.find((e) => e.source_id === adminSourceId);
+
+  async function handleAdminSourceIngest() {
+    if (!adminPdfFile || !adminSourceId) return;
+    setAdminIngestLoading(true);
+    setAdminIngestFeedback(null);
+    try {
+      const fileBytes: ArrayBuffer = await adminPdfFile.arrayBuffer();
+      const res = await putAdminSourceVersion({
+        sourceId: adminSourceId,
+        projectId: selectedProject,
+        fileBytes,
+        versionLabel: adminVersionLabel,
+        accessToken: session?.accessToken,
+      });
+      setAdminIngestFeedback({
+        type: "success",
+        message: res.already_ingested
+          ? `Already Ingested: ${res.source_id} v${res.version_number} (${res.page_count} pages, status=${res.extraction_status})`
+          : `Ingested ${res.source_id} v${res.version_number} into ${selectedProject} → status: ${res.extraction_status} (${res.page_count} pages, text_layer: ${res.text_layer}, SHA-256: ${res.sha256.slice(0, 16)}...)`,
+      });
+      const updatedDocs = await fetchProjectDocuments(selectedProject, session?.accessToken);
+      setProjectDocs(updatedDocs);
+      const updatedReg = await loadAdminSourceCatalog(session?.accessToken);
+      setRegister(updatedReg);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Source ingestion failed";
+      setAdminIngestFeedback({
+        type: "error",
+        message: msg,
+      });
+    } finally {
+      setAdminIngestLoading(false);
+    }
+  }
+
+  // Reviewer Project-Scoped Read-Only Audit & Traceability loader (US-14 / §9.4)
+  useEffect(() => {
+    if (activeTab !== "traceability" || !canReview || !hasSignedToken) {
+      setTraceRuns([]);
+      setTraceError(null);
+      return;
+    }
+    let mounted = true;
+    setTraceLoading(true);
+    const statuses: ReviewGateStatus[] = [
+      "APPROVED",
+      "REJECTED",
+      "EVIDENCE_REQUESTED",
+      "PENDING_EXPERT_REVIEW",
+    ];
+    Promise.all(statuses.map((st) => fetchReviewQueue(selectedProject, st, session?.accessToken)))
+      .then((results) => {
+        if (!mounted) return;
+        const combined = results.flatMap((q) => q.items);
+        combined.sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        setTraceRuns(combined);
+        setTraceError(null);
+      })
+      .catch((err: unknown) => {
+        if (!mounted) return;
+        setTraceRuns([]);
+        setTraceError(
+          err instanceof Error
+            ? err.message
+            : "Could not load project-scoped traceability records"
+        );
+      })
+      .finally(() => {
+        if (mounted) setTraceLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [activeTab, canReview, hasSignedToken, selectedProject, traceRefresh, session?.accessToken]);
+
+  const filteredTraceRuns = traceRuns.filter((run) => {
+    if (traceStatusFilter !== "ALL" && run.status !== traceStatusFilter) return false;
+    if (traceSearch.trim()) {
+      const needle = traceSearch.trim().toLowerCase();
+      const inRun =
+        run.run_id.toLowerCase().includes(needle) ||
+        run.question.toLowerCase().includes(needle) ||
+        run.asked_by.toLowerCase().includes(needle) ||
+        (run.decided_by && run.decided_by.toLowerCase().includes(needle)) ||
+        run.citations.some(
+          (c) =>
+            c.source_id.toLowerCase().includes(needle) ||
+            c.title.toLowerCase().includes(needle) ||
+            c.sha256.toLowerCase().includes(needle)
+        );
+      if (!inRun) return false;
+    }
+    return true;
+  });
 
   useEffect(() => {
     if (activeTab !== "queue" || !canReview || !hasSignedToken) {
@@ -658,113 +905,200 @@ export function App(): React.ReactElement {
         </div>
       </header>
 
-      {/* Primary Workspace Navigation Tabs (S1-08 & S1-12) */}
+      {/* Primary Workspace Navigation Tabs — Role-Separated per PRD §4.1, §4.2, §15 */}
       <nav className="workspace-nav" aria-label="Primary Workspace Views">
-        <button
-          type="button"
-          className={activeTab === "research" ? "nav-tab active" : "nav-tab"}
-          onClick={() => setActiveTab("research")}
-        >
-          <svg
-            className="tab-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"
-            />
-          </svg>
-          <span>1. Research &amp; Strategy</span>
-        </button>
-        <button
-          type="button"
-          className={activeTab === "trials" ? "nav-tab active" : "nav-tab"}
-          onClick={() => setActiveTab("trials")}
-        >
-          <svg
-            className="tab-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5m4.75-11.396C10.608 3.037 11.296 3 12 3c.704 0 1.392.037 2.25.104m-4.5 0v5.714m4.5-5.714v5.714c0 .597.237 1.17.659 1.591L19 14.5M5 14.5a3.75 3.75 0 003.75 3.75h6.5A3.75 3.75 0 0019 14.5m-14 0l2.25-2.25m11.75 2.25l-2.25-2.25"
-            />
-          </svg>
-          <span>2. Trial Verification &amp; DOE</span>
-        </button>
-        <button
-          type="button"
-          className={activeTab === "reports" ? "nav-tab active" : "nav-tab"}
-          onClick={() => setActiveTab("reports")}
-        >
-          <svg
-            className="tab-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-            />
-          </svg>
-          <span>3. Report Review Studio</span>
-        </button>
-        <button
-          type="button"
-          className={activeTab === "queue" ? "nav-tab active" : "nav-tab"}
-          onClick={() => setActiveTab("queue")}
-        >
-          <svg
-            className="tab-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75zm0 5.25h.007v.008H3.75V12zm0 5.25h.007v.008H3.75v-.008z"
-            />
-          </svg>
-          <span>4. Review Queue (Reviewer)</span>
-        </button>
-        <button
-          type="button"
-          className={activeTab === "audit" ? "nav-tab active" : "nav-tab"}
-          onClick={() => setActiveTab("audit")}
-        >
-          <svg
-            className="tab-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9 12.75L11.25 15 15 9.75m-2.25-6.75A9.004 9.004 0 003 12c0 4.298 3.01 7.893 7.058 8.78.6.13 1.284.13 1.884 0A9.004 9.004 0 0021 12c0-3.95-2.545-7.309-6.09-8.487"
-            />
-          </svg>
-          <span>5. Audit Log Viewer (Admin)</span>
-        </button>
+        <div className="workspace-nav-tabs">
+          {session?.role !== "admin" ? (
+            <>
+              <button
+                type="button"
+                className={activeTab === "research" ? "nav-tab active" : "nav-tab"}
+                onClick={() => setActiveTab("research")}
+              >
+                <svg
+                  className="tab-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"
+                  />
+                </svg>
+                <span>1. Research &amp; Strategy</span>
+              </button>
+              <button
+                type="button"
+                className={activeTab === "trials" ? "nav-tab active" : "nav-tab"}
+                onClick={() => setActiveTab("trials")}
+              >
+                <svg
+                  className="tab-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5m4.75-11.396C10.608 3.037 11.296 3 12 3c.704 0 1.392.037 2.25.104m-4.5 0v5.714m4.5-5.714v5.714c0 .597.237 1.17.659 1.591L19 14.5M5 14.5a3.75 3.75 0 003.75 3.75h6.5A3.75 3.75 0 0019 14.5m-14 0l2.25-2.25m11.75 2.25l-2.25-2.25"
+                  />
+                </svg>
+                <span>2. Trial Verification &amp; DOE</span>
+              </button>
+              <button
+                type="button"
+                className={activeTab === "reports" ? "nav-tab active" : "nav-tab"}
+                onClick={() => setActiveTab("reports")}
+              >
+                <svg
+                  className="tab-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  />
+                </svg>
+                <span>3. Report Review Studio</span>
+              </button>
+              {session?.role === "reviewer" && (
+                <>
+                  <button
+                    type="button"
+                    className={activeTab === "queue" ? "nav-tab active" : "nav-tab"}
+                    onClick={() => setActiveTab("queue")}
+                  >
+                    <svg
+                      className="tab-icon"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75zm0 5.25h.007v.008H3.75V12zm0 5.25h.007v.008H3.75v-.008z"
+                      />
+                    </svg>
+                    <span>4. Review Queue (Reviewer)</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={activeTab === "traceability" ? "nav-tab active" : "nav-tab"}
+                    onClick={() => setActiveTab("traceability")}
+                  >
+                    <svg
+                      className="tab-icon"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M9 12.75L11.25 15 15 9.75m-2.25-6.75A9.004 9.004 0 003 12c0 4.298 3.01 7.893 7.058 8.78.6.13 1.284.13 1.884 0A9.004 9.004 0 0021 12c0-3.95-2.545-7.309-6.09-8.487"
+                      />
+                    </svg>
+                    <span>5. Project Traceability &amp; Audit (Reviewer)</span>
+                  </button>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className={activeTab === "admin-docs" ? "nav-tab active" : "nav-tab"}
+                onClick={() => setActiveTab("admin-docs")}
+              >
+                <svg
+                  className="tab-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m6.75 12l-3-3m0 0l-3 3m3-3v6m-1.5-15H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+                  />
+                </svg>
+                <span>1. Project Documents &amp; Source Eligibility</span>
+              </button>
+              <button
+                type="button"
+                className={activeTab === "audit" ? "nav-tab active" : "nav-tab"}
+                onClick={() => setActiveTab("audit")}
+              >
+                <svg
+                  className="tab-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 12.75L11.25 15 15 9.75m-2.25-6.75A9.004 9.004 0 003 12c0 4.298 3.01 7.893 7.058 8.78.6.13 1.284.13 1.884 0A9.004 9.004 0 0021 12c0-3.95-2.545-7.309-6.09-8.487"
+                  />
+                </svg>
+                {/* 5. Audit Log Viewer (Admin) */}<span>2. Audit Log Viewer (Admin)</span>
+              </button>
+              <button
+                type="button"
+                className={activeTab === "admin-access" ? "nav-tab active" : "nav-tab"}
+                onClick={() => setActiveTab("admin-access")}
+              >
+                <svg
+                  className="tab-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"
+                  />
+                </svg>
+                <span>3. Project &amp; Role Access Matrix</span>
+              </button>
+            </>
+          )}
+        </div>
+        {session && (
+          <div className="workspace-mode-indicator">
+            <span className="role-pill">
+              {session.role === "admin"
+                ? "Admin / Data Owner Console (§15 Least Privilege)"
+                : session.role === "reviewer"
+                  ? "Reviewer Workspace (Sign-Off + US-14 Project Traceability)"
+                  : "Scientist Researcher Workspace (§4.2 Read-Only Corpus)"}
+            </span>
+          </div>
+        )}
       </nav>
 
       {/* Main Content Area */}
@@ -1970,6 +2304,596 @@ export function App(): React.ReactElement {
                     </table>
                   </>
                 )}
+              </section>
+            )}
+
+            {/* VIEW 5 (REVIEWER): PROJECT-SCOPED READ-ONLY AUDIT & TRACEABILITY VIEW (US-14 / §9.4) */}
+            {activeTab === "traceability" && (
+              <section className="card" aria-labelledby="traceability-heading">
+                <div className="section-title-row">
+                  <div className="doc-badges">
+                    <h2 id="traceability-heading">
+                      Project-Scoped Read-Only Audit &amp; Traceability View — {selectedProject}
+                    </h2>
+                    <span className="spec-pill">US-14 · §9.4 · FR-03 · Read-Only</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-header-outline"
+                    onClick={() => setTraceRefresh((n) => n + 1)}
+                    disabled={traceLoading}
+                  >
+                    {traceLoading ? "Refreshing..." : "Refresh Traceability"}
+                  </button>
+                </div>
+
+                {!canReview ? (
+                  <div className="forbidden-banner" role="alert">
+                    <h3>403 Forbidden — Reviewer Role Required</h3>
+                    <p>
+                      Project-scoped audit and statement traceability (US-14) is restricted to
+                      authorized scientific and quality reviewers.
+                    </p>
+                  </div>
+                ) : !session.projectIds.includes(selectedProject) ? (
+                  <div className="forbidden-banner" role="alert">
+                    <h3>403 Forbidden — Outside Authorized Project Scope</h3>
+                    <p>
+                      Reviewer <strong>{session.name}</strong> ({session.email}) is authorized only
+                      for <code>{session.projectIds.join(", ") || "no projects"}</code>. Per FR-03
+                      and US-14, audit and traceability records for <strong>{selectedProject}</strong>{" "}
+                      cannot be read outside project authorization.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="muted">
+                      Read-only project traceability for <strong>{selectedProject}</strong> (US-14 /
+                      §9.4). Trace every grounded research statement back to its exact source
+                      document version, SHA-256 fingerprint, page number, and expert review sign-off.
+                    </p>
+
+                    <div className="filter-bar">
+                      <label>
+                        Scoped Project:{" "}
+                        <input
+                          type="text"
+                          value={selectedProject}
+                          disabled
+                          aria-label="Scoped Project"
+                        />
+                      </label>
+                      <label>
+                        Review Gate Status:{" "}
+                        <select
+                          aria-label="Filter Traceability by Review Status"
+                          value={traceStatusFilter}
+                          onChange={(e) =>
+                            setTraceStatusFilter(e.target.value as "ALL" | ReviewGateStatus)
+                          }
+                        >
+                          <option value="ALL">All Statuses ({traceRuns.length})</option>
+                          <option value="APPROVED">APPROVED</option>
+                          <option value="REJECTED">REJECTED</option>
+                          <option value="EVIDENCE_REQUESTED">EVIDENCE_REQUESTED</option>
+                          <option value="PENDING_EXPERT_REVIEW">PENDING_EXPERT_REVIEW</option>
+                        </select>
+                      </label>
+                      <label>
+                        Search Run / Source / SHA-256:{" "}
+                        <input
+                          type="text"
+                          aria-label="Search Project Traceability"
+                          placeholder="e.g. RUN-..., FDA-NITRO-2024, SHA-256..."
+                          value={traceSearch}
+                          onChange={(e) => setTraceSearch(e.target.value)}
+                        />
+                      </label>
+                    </div>
+
+                    {traceError && (
+                      <div className="upload-status error" role="alert">
+                        {traceError}
+                      </div>
+                    )}
+
+                    <h3>
+                      1. Statement-to-Source &amp; Approval Lineage ({filteredTraceRuns.length}{" "}
+                      recorded workflow run(s) in {selectedProject})
+                    </h3>
+                    {filteredTraceRuns.length === 0 && !traceLoading ? (
+                      <p className="muted">
+                        No workflow runs match the current filter in {selectedProject}.
+                      </p>
+                    ) : (
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Workflow Run ID</th>
+                            <th>Timestamp (UTC)</th>
+                            <th>Asked By</th>
+                            <th>Question &amp; Grounded Statement</th>
+                            <th>Cited Source Versions &amp; SHA-256</th>
+                            <th>Review Status</th>
+                            <th>Reviewer Sign-Off</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredTraceRuns.map((run) => (
+                            <tr key={run.run_id}>
+                              <td>
+                                <code>{run.run_id}</code>
+                              </td>
+                              <td>{new Date(run.created_at).toLocaleString()}</td>
+                              <td>
+                                <code>{run.asked_by}</code>
+                              </td>
+                              <td>
+                                <strong>{run.question}</strong>
+                                <div className="muted" style={{ marginTop: "0.25rem" }}>
+                                  {run.answer.slice(0, 180)}
+                                  {run.answer.length > 180 ? "..." : ""}
+                                </div>
+                              </td>
+                              <td>
+                                {run.citations.length === 0 ? (
+                                  <span className="badge-unverified">Withheld (0 citations)</span>
+                                ) : (
+                                  <div className="trace-citation-stack">
+                                    {run.citations.map((c, idx) => (
+                                      <div key={`${c.source_id}-${idx}`} className="trace-cit-pill">
+                                        <strong>
+                                          {c.source_id} v{c.version_number}
+                                        </strong>{" "}
+                                        (p. {pageLabel(c.page, c.page_end)}) ·{" "}
+                                        <code>SHA-256: {c.sha256.slice(0, 12)}...</code>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                              <td>{renderReviewStatusBadge(run.status)}</td>
+                              <td>
+                                {run.decided_by ? (
+                                  <>
+                                    <strong>{run.decided_by}</strong>
+                                    {run.decided_at && (
+                                      <div className="muted">
+                                        {new Date(run.decided_at).toLocaleString()}
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span className="muted">Awaiting review</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+
+                    <div className="review-history-section">
+                      <h3>
+                        2. Authorized Source Version &amp; Provenance Baseline — {selectedProject} (
+                        {projectDocs.length} documents)
+                      </h3>
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Source ID</th>
+                            <th>Document Title</th>
+                            <th>Authority</th>
+                            <th>Active Version</th>
+                            <th>Pages</th>
+                            <th>Extraction &amp; Text Layer</th>
+                            <th>SHA-256 Fingerprint</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {projectDocs.map((doc) => (
+                            <tr key={doc.document_id}>
+                              <td>
+                                <code>{doc.source_id}</code>
+                              </td>
+                              <td>
+                                <strong>{doc.title}</strong>
+                              </td>
+                              <td>
+                                <span className="publisher-tag">{doc.authority}</span>
+                              </td>
+                              <td>
+                                <code>
+                                  v{doc.latest_version.version_number}
+                                  {doc.latest_version.version_label
+                                    ? ` (${doc.latest_version.version_label})`
+                                    : ""}
+                                </code>
+                              </td>
+                              <td>{doc.latest_version.page_count ?? "-"}</td>
+                              <td>
+                                <span
+                                  className={
+                                    doc.latest_version.extraction_status === "ok"
+                                      ? "badge-verified"
+                                      : "badge-warning"
+                                  }
+                                >
+                                  {(doc.latest_version.extraction_status ?? "not recorded").toUpperCase()}{" "}
+                                  / Text: {(doc.latest_version.text_layer ?? "not recorded").toUpperCase()}
+                                </span>
+                              </td>
+                              <td>
+                                <code>{doc.latest_version.sha256}</code>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
+
+            {/* ADMIN CONSOLE VIEW 1: PROJECT DOCUMENTS & SOURCE ELIGIBILITY (FR-04 / ADR-007) */}
+            {activeTab === "admin-docs" && session.role === "admin" && (
+              <div className="two-column-grid">
+                <section className="card" aria-labelledby="admin-ingest-heading">
+                  <div className="section-title-row">
+                    <h2 id="admin-ingest-heading">
+                      Source Eligibility &amp; Version Acquisition — {selectedProject}
+                    </h2>
+                    <span className="spec-pill">FR-04 · ADR-007 · Admin / Data Owner</span>
+                  </div>
+                  <p className="muted">
+                    Acquire approved regulatory sources, verify licence eligibility, upload new PDF
+                    versions into <strong>{selectedProject}</strong>, and inspect SHA-256 provenance
+                    and indexing readiness.
+                  </p>
+
+                  <div className="upload-panel" aria-label="Admin Source Acquisition Panel">
+                    <div className="upload-panel-header">
+                      <h3>Acquire &amp; Store Approved Source PDF</h3>
+                      <span className="role-pill">Admin / Data Owner Only (FR-04)</span>
+                    </div>
+                    <div className="upload-grid">
+                      <label>
+                        Approved Source Register Entry:
+                        <select
+                          aria-label="Select Approved Source ID"
+                          value={adminSourceId}
+                          onChange={(e) => setAdminSourceId(e.target.value)}
+                          disabled={registerOptions.length === 0}
+                        >
+                          {registerOptions.length === 0 && (
+                            <option value="">
+                              {registerError
+                                ? "Register unavailable"
+                                : "Loading approved-source register..."}
+                            </option>
+                          )}
+                          {registerOptions.map((entry) => (
+                            <option key={entry.source_id} value={entry.source_id}>
+                              {entry.source_id} — {entry.title}
+                              {!entry.eligible
+                                ? " (HELD: ingestion refused)"
+                                : !entry.stored
+                                  ? " (not stored yet)"
+                                  : entry.project_ids.length > 0
+                                    ? ` (assigned: ${entry.project_ids.join(", ")})`
+                                    : " (unassigned)"}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Version Label:
+                        <input
+                          type="text"
+                          aria-label="Version Label"
+                          value={adminVersionLabel}
+                          onChange={(e) => setAdminVersionLabel(e.target.value)}
+                          placeholder="e.g. Revision 2"
+                        />
+                      </label>
+                    </div>
+
+                    {registerError && (
+                      <div className="upload-status error" role="alert">
+                        {registerError}
+                      </div>
+                    )}
+                    {chosenAdminSource && !chosenAdminSource.eligible && (
+                      <div className="upload-status error" role="status">
+                        {chosenAdminSource.source_id} is held
+                        {chosenAdminSource.hold_reason ? `: ${chosenAdminSource.hold_reason}` : ""}.
+                        The backend API will refuse this file (409 Conflict) and record{" "}
+                        <code>DOCUMENT_INGEST_REFUSED</code>.
+                      </div>
+                    )}
+                    {chosenAdminSource &&
+                      chosenAdminSource.eligible &&
+                      chosenAdminSource.stored &&
+                      !chosenAdminSource.project_ids.includes(selectedProject) && (
+                        <div className="upload-status error" role="status">
+                          {chosenAdminSource.source_id} is currently assigned to{" "}
+                          {chosenAdminSource.project_ids.length > 0
+                            ? chosenAdminSource.project_ids.join(", ")
+                            : "no project"}
+                          . Ingesting it here will also assign it to <strong>{selectedProject}</strong>.
+                        </div>
+                      )}
+
+                    <div className="file-dropzone">
+                      <label className="file-dropzone-label" htmlFor="admin-source-pdf-input">
+                        <div className="dropzone-icon-box">
+                          <svg
+                            className="upload-cloud-icon"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"
+                            />
+                          </svg>
+                        </div>
+                        <div className="dropzone-text-block">
+                          <strong className="dropzone-bold-text">
+                            {adminPdfFile
+                              ? adminPdfFile.name
+                              : `Select verified regulatory PDF to assign to ${selectedProject}`}
+                          </strong>
+                          <span className="dropzone-sub-text">
+                            Computes SHA-256 fingerprint, extracts page text via pypdf, and records
+                            an immutable DOCUMENT_INGESTED audit event.
+                          </span>
+                        </div>
+                        <input
+                          id="admin-source-pdf-input"
+                          type="file"
+                          accept=".pdf,application/pdf"
+                          aria-label="Select PDF File"
+                          className="visually-hidden-file-input"
+                          onChange={(e) => setAdminPdfFile(e.target.files?.[0] || null)}
+                        />
+                      </label>
+                      <div className="button-group upload-btn-group">
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          disabled={adminIngestLoading || !adminPdfFile || !adminSourceId}
+                          onClick={() => handleAdminSourceIngest()}
+                        >
+                          {adminIngestLoading
+                            ? "Extracting & Fingerprinting..."
+                            : `Store PDF Version in ${selectedProject}`}
+                        </button>
+                      </div>
+                    </div>
+
+                    {adminIngestFeedback && (
+                      <div
+                        className={`upload-status ${adminIngestFeedback.type}`}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {adminIngestFeedback.message}
+                      </div>
+                    )}
+                  </div>
+
+                  <h3>
+                    Approved Source Register &amp; Indexing Status ({(register ?? []).length} sources)
+                  </h3>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Source ID</th>
+                        <th>Authority &amp; Title</th>
+                        <th>Eligibility</th>
+                        <th>Stored Version</th>
+                        <th>Assigned Projects</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(register ?? []).map((entry) => (
+                        <tr key={entry.source_id}>
+                          <td>
+                            <code>{entry.source_id}</code>
+                          </td>
+                          <td>
+                            <span className="publisher-tag">{entry.authority}</span>{" "}
+                            <strong>{entry.title}</strong>
+                          </td>
+                          <td>
+                            {entry.eligible ? (
+                              <span className="badge-verified">ELIGIBLE ({entry.tier})</span>
+                            ) : (
+                              <span className="badge-unverified" title={entry.hold_reason ?? ""}>
+                                HELD ({entry.hold_reason ?? "licence hold"})
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            {entry.stored && entry.latest_version != null ? (
+                              <span className="badge-verified">v{entry.latest_version} Stored</span>
+                            ) : (
+                              <span className="badge-warning">Not Stored</span>
+                            )}
+                          </td>
+                          <td>
+                            {entry.project_ids.length > 0 ? (
+                              <code>{entry.project_ids.join(", ")}</code>
+                            ) : (
+                              <span className="muted">None</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+
+                <section className="card" aria-labelledby="admin-library-heading">
+                  <div className="section-title-row">
+                    <h2 id="admin-library-heading">
+                      Project Document Library — {selectedProject} ({projectDocs.length})
+                    </h2>
+                    <span className="spec-pill">S2-05 · SHA-256 Provenance</span>
+                  </div>
+                  <p className="muted">
+                    Ingested document versions, SHA-256 fingerprints, extraction status, and text
+                    layer flags currently active in <strong>{selectedProject}</strong>.
+                  </p>
+
+                  {libraryError && (
+                    <div className="upload-status error" role="alert">
+                      Could not load this project&apos;s documents: {libraryError}
+                    </div>
+                  )}
+
+                  <ul className="source-list" aria-label="Admin Project Ingested Documents">
+                    {[...projectDocs]
+                      .sort(
+                        (a, b) => b.latest_version.version_number - a.latest_version.version_number
+                      )
+                      .map((doc) => {
+                        const ver = doc.latest_version;
+                        const versions =
+                          doc.versions && doc.versions.length > 0 ? doc.versions : [ver];
+                        const isStatusOk = ver.extraction_status === "ok";
+                        const isTextLayerFull = ver.text_layer === "yes";
+                        return (
+                          <li key={doc.document_id} className="source-item">
+                            <div className="source-header">
+                              <div className="doc-title-row">
+                                <span className="doc-type-badge pdf-badge">PDF</span>
+                                <strong>{doc.title}</strong>
+                              </div>
+                              <div className="doc-header-tags">
+                                <span className="publisher-tag">{doc.authority}</span>
+                                <code className="hash-code">{doc.source_id}</code>
+                              </div>
+                            </div>
+                            <div className="doc-badges">
+                              <span className={isStatusOk ? "badge-verified" : "badge-unverified"}>
+                                {ver.extraction_status
+                                  ? `Status: ${ver.extraction_status.toUpperCase()} (Extracted)`
+                                  : "Status: NOT RECORDED"}
+                              </span>
+                              <span
+                                className={isTextLayerFull ? "badge-verified" : "badge-warning"}
+                              >
+                                {isTextLayerFull
+                                  ? "Text Layer: YES (Selectable)"
+                                  : `⚠ Uncertainty Flag: Text Layer ${(ver.text_layer || "not recorded").toUpperCase()}`}
+                              </span>
+                              <span className="hash-code">
+                                Latest: v{ver.version_number}
+                                {ver.version_label ? ` (${ver.version_label})` : ""}
+                              </span>
+                            </div>
+                            <code className="hash-code" title="SHA-256 Provenance Fingerprint">
+                              SHA-256: {ver.sha256}
+                            </code>
+                            <div className="version-history-box version-timeline">
+                              <span className="version-history-title">
+                                <strong>Version History ({versions.length}):</strong>
+                              </span>
+                              <div className="timeline-track">
+                                {versions.map((v) => (
+                                  <div key={v.version_id} className="timeline-item">
+                                    <span className="timeline-dot" aria-hidden="true" />
+                                    <div className="timeline-body">
+                                      <span className="timeline-version-name">
+                                        <strong>v{v.version_number}</strong>
+                                        {v.version_label ? ` — ${v.version_label}` : ""}
+                                      </span>
+                                      <span className="timeline-meta">
+                                        ({v.page_count ?? "?"}p,{" "}
+                                        {v.extraction_status ?? "status not recorded"})
+                                      </span>
+                                      <code className="timeline-hash">
+                                        SHA-256: {v.sha256.slice(0, 12)}...
+                                      </code>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      })}
+                  </ul>
+                </section>
+              </div>
+            )}
+
+            {/* ADMIN CONSOLE VIEW 3: PROJECT & ROLE ACCESS MATRIX (§4.1, §4.2, §15) */}
+            {activeTab === "admin-access" && session.role === "admin" && (
+              <section className="card" aria-labelledby="admin-access-heading">
+                <div className="section-title-row">
+                  <h2 id="admin-access-heading">
+                    Project &amp; Role Access Matrix (Least Privilege per §4.1, §4.2, §15)
+                  </h2>
+                  <span className="spec-pill">FR-02 · FR-03 · §15 Least Privilege</span>
+                </div>
+                <p className="muted">
+                  Enterprise OIDC role separation and project-scoped authorization enforced across
+                  the backend API and workspace views. Scientists and Reviewers never access
+                  document ingestion; Admins manage source eligibility and system-wide audit logs
+                  without accessing Research Q&amp;A or Reviewer sign-off queues.
+                </p>
+
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>User Name</th>
+                      <th>Email / OIDC Subject</th>
+                      <th>Assigned Role</th>
+                      {DEV_PROJECT_IDS.map((pid) => (
+                        <th key={pid}>{pid} Access</th>
+                      ))}
+                      <th>Workspace Views &amp; Enforced Capabilities</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {DEV_USERS.map((u) => (
+                      <tr key={u.key}>
+                        <td>
+                          <strong>{u.name}</strong>
+                        </td>
+                        <td>
+                          {u.email} (<code>dev-{u.key}</code>)
+                        </td>
+                        <td>
+                          <span className="role-pill">{u.role.toUpperCase()}</span>
+                        </td>
+                        {DEV_PROJECT_IDS.map((pid) => (
+                          <td key={pid}>
+                            {u.projects.includes(pid) ? (
+                              <span className="badge-verified">✓ Authorized</span>
+                            ) : (
+                              <span className="badge-unverified">✕ 403 Denied</span>
+                            )}
+                          </td>
+                        ))}
+                        <td>
+                          {u.role === "admin"
+                            ? "Admin Console: Project Documents & Source Eligibility (PUT /sources), Global Audit Log & CSV Export"
+                            : u.role === "reviewer"
+                              ? "Researcher Views + Review Queue Sign-Off (POST /research/reviews) + Project-Scoped Traceability & Audit (US-14)"
+                              : "Researcher Workspace (Research & Strategy, Trial Verification & DOE, Report Review Studio); Read-Only Document Library"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </section>
             )}
           </>
