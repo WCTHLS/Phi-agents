@@ -31,19 +31,20 @@ from pharma_ai.infrastructure.db.models import (
 )
 
 
-def _newest_versions() -> Any:
+def _newest_versions(*, indexed_only: bool = False) -> Any:
     """A subquery giving the highest version number of every document.
 
     Joined on (document_id, version_number) it keeps only each document's newest version.
+    With ``indexed_only`` the newest version that has passages: a version that has been uploaded
+    but not yet indexed does not hide the older version that can be searched.
     """
-    return (
-        select(
-            DocumentVersion.document_id.label("document_id"),
-            func.max(DocumentVersion.version_number).label("version_number"),
-        )
-        .group_by(DocumentVersion.document_id)
-        .subquery()
+    stmt = select(
+        DocumentVersion.document_id.label("document_id"),
+        func.max(DocumentVersion.version_number).label("version_number"),
     )
+    if indexed_only:
+        stmt = stmt.where(exists().where(Chunk.version_id == DocumentVersion.version_id))
+    return stmt.group_by(DocumentVersion.document_id).subquery()
 
 
 MAX_KEYWORD_TERMS = 32
@@ -126,15 +127,34 @@ class SourceRepository:
             )
         ):
             projects.setdefault(document_id, []).append(project_id)
-        return [
-            RegisterEntry(
-                source=source,
-                document_id=document_ids.get(source.source_id),
-                latest_version=newest.get(document_ids.get(source.source_id)),
-                project_ids=tuple(projects.get(document_ids.get(source.source_id), ())),
+        # Passages per version, to say whether the newest version can be searched yet.
+        passages: dict[uuid.UUID, dict[int, int]] = {}
+        for document_id, number, count in self._session.execute(
+            select(
+                DocumentVersion.document_id,
+                DocumentVersion.version_number,
+                func.count(Chunk.chunk_id),
             )
-            for source in sources
-        ]
+            .outerjoin(Chunk, Chunk.version_id == DocumentVersion.version_id)
+            .group_by(DocumentVersion.document_id, DocumentVersion.version_number)
+        ):
+            passages.setdefault(document_id, {})[number] = count
+        entries = []
+        for source in sources:
+            document_id = document_ids.get(source.source_id)
+            counts = passages.get(document_id, {})
+            latest = newest.get(document_id)
+            entries.append(
+                RegisterEntry(
+                    source=source,
+                    document_id=document_id,
+                    latest_version=latest,
+                    project_ids=tuple(projects.get(document_id, ())),
+                    latest_passages=counts.get(latest, 0) if latest is not None else 0,
+                    searchable_version=max((n for n, c in counts.items() if c), default=None),
+                )
+            )
+        return entries
 
 
 @dataclass(frozen=True)
@@ -143,6 +163,8 @@ class RegisterEntry:
     document_id: uuid.UUID | None  # None until a file has been stored for the source
     latest_version: int | None
     project_ids: tuple[str, ...]  # the projects that may search the document
+    latest_passages: int = 0  # passages of the newest version; 0 = uploaded but not yet indexed
+    searchable_version: int | None = None  # the newest version that has passages
 
 
 class DocumentRepository:
@@ -343,7 +365,8 @@ class ChunkRepository:
 
         Every rule that decides what the caller may see is here, so the vector search and the
         keyword search cannot disagree: the caller's projects, an eligible source, a chunk that
-        has been embedded by the named model, and (by default) the newest version of the document.
+        has been embedded by the named model, and (by default) the newest indexed version of the
+        document.
         """
         has_access = exists().where(
             ProjectDocument.document_id == Document.document_id,
@@ -362,7 +385,7 @@ class ChunkRepository:
             )
         )
         if latest_only:
-            newest = _newest_versions()
+            newest = _newest_versions(indexed_only=True)
             stmt = stmt.join(
                 newest,
                 and_(

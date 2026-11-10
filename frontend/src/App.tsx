@@ -17,6 +17,8 @@ import {
   QueuedRun,
   RegisterEntry,
   IngestedDocumentResponse,
+  indexSourceVersion,
+  IndexedVersionResponse,
   ReviewQueue,
 } from "./api/client";
 import {
@@ -92,6 +94,23 @@ async function putAdminSourceVersion(params: {
     throw new Error(detail);
   }
   return (await response.json()) as IngestedDocumentResponse;
+}
+
+/** What the upload panel says after an indexing run, using only what the server returned. */
+function indexFeedback(
+  stored: string,
+  done: IndexedVersionResponse
+): { type: "success" | "error"; message: string } {
+  if (done.status === "skipped") {
+    return {
+      type: "error",
+      message: `${stored} NOT indexed: ${done.reason ?? "no passages could be made"}.`,
+    };
+  }
+  return {
+    type: "success",
+    message: `${stored} Indexed: ${done.passages} passages. Questions can now use v${done.version_number}.`,
+  };
 }
 
 interface AuditRecord {
@@ -374,12 +393,39 @@ export function App(): React.ReactElement {
         versionLabel: adminVersionLabel,
         accessToken: session?.accessToken,
       });
-      setAdminIngestFeedback({
-        type: "success",
-        message: res.already_ingested
-          ? `Already Ingested: ${res.source_id} v${res.version_number} (${res.page_count} pages, status=${res.extraction_status})`
-          : `Ingested ${res.source_id} v${res.version_number} into ${selectedProject} → status: ${res.extraction_status} (${res.page_count} pages, text_layer: ${res.text_layer}, SHA-256: ${res.sha256.slice(0, 16)}...)`,
-      });
+      const stored = res.already_ingested
+        ? `Already Ingested: ${res.source_id} v${res.version_number} (${res.page_count} pages, status=${res.extraction_status})`
+        : `Ingested ${res.source_id} v${res.version_number} into ${selectedProject} → status: ${res.extraction_status} (${res.page_count} pages, text_layer: ${res.text_layer}, SHA-256: ${res.sha256.slice(0, 16)}...)`;
+      if (res.warnings.length > 0) {
+        // The file may be the wrong one, so it is not indexed until the administrator decides.
+        setAdminIngestFeedback({
+          type: "error",
+          message: `${stored} NOT indexed. ${res.warnings.join(" ")} Use "Index" in the register below once you are sure.`,
+        });
+      } else if (res.passages > 0) {
+        setAdminIngestFeedback({
+          type: "success",
+          message: `${stored} Already indexed (${res.passages} passages).`,
+        });
+      } else {
+        setAdminIngestFeedback({
+          type: "success",
+          message: `${stored} Indexing (the first time after the server starts this can take up to a minute)...`,
+        });
+        try {
+          const done = await indexSourceVersion({
+            sourceId: res.source_id,
+            versionNumber: res.version_number,
+            accessToken: session?.accessToken,
+          });
+          setAdminIngestFeedback(indexFeedback(stored, done));
+        } catch (err) {
+          setAdminIngestFeedback({
+            type: "error",
+            message: `${stored} NOT indexed: ${err instanceof Error ? err.message : "indexing failed"}. Use "Index" in the register below to try again.`,
+          });
+        }
+      }
       const updatedDocs = await fetchProjectDocuments(selectedProject, session?.accessToken);
       setProjectDocs(updatedDocs);
       const updatedReg = await loadAdminSourceCatalog(session?.accessToken);
@@ -389,6 +435,34 @@ export function App(): React.ReactElement {
       setAdminIngestFeedback({
         type: "error",
         message: msg,
+      });
+    } finally {
+      setAdminIngestLoading(false);
+    }
+  }
+
+  // Index a version that is stored but not yet searchable (the "Index" button in the register).
+  async function handleAdminIndex(entry: RegisterEntry) {
+    if (entry.latest_version == null) return;
+    setAdminIngestLoading(true);
+    const label = `${entry.source_id} v${entry.latest_version}`;
+    setAdminIngestFeedback({
+      type: "success",
+      message: `Indexing ${label} (the first time after the server starts this can take up to a minute)...`,
+    });
+    try {
+      const done = await indexSourceVersion({
+        sourceId: entry.source_id,
+        versionNumber: entry.latest_version,
+        accessToken: session?.accessToken,
+      });
+      setAdminIngestFeedback(indexFeedback(label + ".", done));
+      setRegister(await loadAdminSourceCatalog(session?.accessToken));
+      setProjectDocs(await fetchProjectDocuments(selectedProject, session?.accessToken));
+    } catch (err) {
+      setAdminIngestFeedback({
+        type: "error",
+        message: `${label} NOT indexed: ${err instanceof Error ? err.message : "indexing failed"}`,
       });
     } finally {
       setAdminIngestLoading(false);
@@ -2697,6 +2771,7 @@ export function App(): React.ReactElement {
                         <th>Authority &amp; Title</th>
                         <th>Eligibility</th>
                         <th>Stored Version</th>
+                        <th>Questions Use</th>
                         <th>Assigned Projects</th>
                       </tr>
                     </thead>
@@ -2724,6 +2799,31 @@ export function App(): React.ReactElement {
                               <span className="badge-verified">v{entry.latest_version} Stored</span>
                             ) : (
                               <span className="badge-warning">Not Stored</span>
+                            )}
+                          </td>
+                          <td>
+                            {entry.latest_version == null ? (
+                              <span className="muted">—</span>
+                            ) : entry.latest_passages > 0 ? (
+                              <span className="badge-verified">
+                                v{entry.latest_version} ({entry.latest_passages} passages)
+                              </span>
+                            ) : (
+                              <>
+                                <span className="badge-warning">
+                                  {entry.searchable_version != null
+                                    ? `v${entry.searchable_version} (v${entry.latest_version} not indexed)`
+                                    : "None: not indexed"}
+                                </span>{" "}
+                                <button
+                                  type="button"
+                                  className="btn-secondary"
+                                  disabled={adminIngestLoading}
+                                  onClick={() => handleAdminIndex(entry)}
+                                >
+                                  Index v{entry.latest_version}
+                                </button>
+                              </>
                             )}
                           </td>
                           <td>

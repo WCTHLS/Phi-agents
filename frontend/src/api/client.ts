@@ -291,6 +291,20 @@ export interface IngestedDocumentResponse extends DocumentVersionInfo {
   source_id: string;
   already_ingested: boolean;
   project_ids: string[];
+  /** Passages stored for this version. 0 means it is not indexed, so questions cannot use it yet. */
+  passages: number;
+  /** Things to check before indexing, for example a PDF that does not look like its register entry. */
+  warnings: string[];
+}
+
+export interface IndexedVersionResponse {
+  source_id: string;
+  version_number: number;
+  /** indexed, reindexed, already_indexed or skipped. */
+  status: string;
+  passages: number;
+  embedding_model: string;
+  reason?: string | null;
 }
 
 export interface ProjectDocument {
@@ -354,6 +368,10 @@ export interface RegisterEntry {
   stored: boolean;
   latest_version?: number | null;
   project_ids: string[];
+  /** Passages of the newest version; 0 means uploaded but not indexed yet. */
+  latest_passages: number;
+  /** The version questions are answered from (null: none can be searched yet). */
+  searchable_version?: number | null;
 }
 
 export async function fetchSourceRegister(accessToken?: string): Promise<RegisterEntry[]> {
@@ -409,4 +427,24 @@ export async function uploadSourceDocument(params: {
     throw new Error(detail);
   }
   return (await response.json()) as IngestedDocumentResponse;
+}
+
+/** Cut a stored version into passages so questions can use it (administrators only). */
+export async function indexSourceVersion(params: {
+  sourceId: string;
+  versionNumber: number;
+  accessToken?: string;
+}): Promise<IndexedVersionResponse> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (params.accessToken) {
+    headers.Authorization = `Bearer ${params.accessToken}`;
+  }
+  const response = await fetch(
+    `${API_BASE}/api/v1/sources/${encodeURIComponent(params.sourceId)}/versions/${params.versionNumber}/index`,
+    { method: "POST", headers }
+  );
+  if (!response.ok) {
+    throw await failure(response, "Indexing failed");
+  }
+  return (await response.json()) as IndexedVersionResponse;
 }
